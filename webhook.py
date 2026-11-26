@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-"""Minimal webhook server for the ZenachBot Telegram bot.
+"""Minimal webhook server for the HikmaOnlineShoppingBot Telegram bot.
 
 This module is intentionally lightweight so the project can run in webhook mode
 without depending on a more complete application bootstrap.
@@ -43,7 +43,7 @@ def init_runtime() -> None:
 
 @app.route('/', methods=['GET'])
 def index() -> str:
-    return 'ZenachBot webhook service is running.'
+    return 'HikmaOnlineShoppingBot webhook service is running.'
 
 
 @app.route('/webhook', methods=['POST'])

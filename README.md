@@ -1,6 +1,6 @@
-ZenachBot
+# Hikma Online Shopping Bot
 
-ZenachBot is a Telegram commerce bot for catalog browsing, orders, payments, and admin management.
+Hikma Online Shopping is a Telegram commerce bot for catalog browsing, orders, payments, and admin management.
 
 Features
 - Product catalog with categories and stock tracking
@@ -15,12 +15,15 @@ Quick start
 
 	pip install -r requirements.txt
 
-3. Create a PostgreSQL database and set the required environment variables before startup:
+3. Copy `.env.example` to `.env`, then set the required secrets and database values:
 
-	BOT_TOKEN=your_telegram_bot_token
-	ADMIN_IDS=123456789
-	DATABASE_URL=postgresql://user:password@localhost:5432/zenach
-	SECRET_KEY=long-random-secret
+	`BOT_TOKEN`, `ADMIN_USERNAME`, `ADMIN_IDS`, `DATABASE_URL`, and `SECRET_KEY`
+
+Set `BANK_NAME`, `BANK_ACCOUNT_HOLDER`, `BANK_ACCOUNT_NUMBER`, and
+`BANK_BUSINESS_CODE` only if you want to offer bank-transfer payments.
+Keep real credentials in `.env`; never commit that file.
+
+Administrators can add products with `/add` and delete one with `/delete <id>`.
 
 4. Start the bot:
 
@@ -39,8 +42,8 @@ Docker
 
 Build and run with:
 
-	docker build -t zenach-bot .
-	docker run --env-file .env -p 8000:8000 zenach-bot
+	docker build -t hikma-online-shopping-bot .
+	docker run --env-file .env -p 8000:8000 hikma-online-shopping-bot
 
 Testing
 

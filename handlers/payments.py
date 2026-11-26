@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """
-ዘናጭ ቦት - የክፍያ እጅ አያያዝ
+Hikma Online Shopping Bot - የክፍያ እጅ አያያዝ
 ይህ ፋይል ሁሉንም የክፍያ ተዛማጅ እጅ አያያዞችን ይይዛል
 """
 
@@ -529,20 +529,23 @@ def register(bot: TeleBot, db: Database):
     
     def get_bank_info(lang: str = 'am') -> str:
         """የባንክ መረጃ ማግኘት"""
+        labels = (
+            ('🏦 የባንክ ስም', config.payment.BANK_NAME),
+            ('👤 ባለሂሳብ', config.payment.BANK_ACCOUNT_HOLDER),
+            ('🔢 የሂሳብ ቁጥር', config.payment.BANK_ACCOUNT_NUMBER),
+            ('🔢 የንግድ ኮድ', config.payment.BANK_BUSINESS_CODE),
+        ) if lang == 'am' else (
+            ('🏦 Bank Name', config.payment.BANK_NAME),
+            ('👤 Account Holder', config.payment.BANK_ACCOUNT_HOLDER),
+            ('🔢 Account Number', config.payment.BANK_ACCOUNT_NUMBER),
+            ('🔢 Business Code', config.payment.BANK_BUSINESS_CODE),
+        )
+        details = [f"{label}: {value}" for label, value in labels if value]
+        if details:
+            return '\n'.join(details)
         if lang == 'am':
-            return """
-🏦 የባንክ ስም: አብሲኒያ ባንክ
-👤 ባለሂሳብ: ዘናጭ ልብስ ቤት
-🔢 የሂሳብ ቁጥር: 1234567890
-🔢 የንግድ ኮድ: 9876543210
-"""
-        else:
-            return """
-🏦 Bank Name: Abyssinia Bank
-👤 Account Holder: Zenach Boutique
-🔢 Account Number: 1234567890
-🔢 Business Code: 9876543210
-"""
+            return "የባንክ መረጃ ለማግኘት አስተዳዳሪውን ያነጋግሩ."
+        return "Contact the administrator for bank transfer details."
     
     # ==================== የChapa ዌብሁክ ====================
     

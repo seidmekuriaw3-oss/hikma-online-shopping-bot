@@ -1,5 +1,5 @@
 [project]
-name = "zenach-bot"
+name = "hikma-online-shopping-bot"
 version = "0.1.0"
 description = "Telegram commerce bot for product orders and admin management"
 readme = "README.md"

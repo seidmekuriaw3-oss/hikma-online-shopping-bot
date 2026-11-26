@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """
-ዘናጭ ቦት - የክፍያ አገልግሎት
+Hikma Online Shopping Bot - የክፍያ አገልግሎት
 ይህ ፋይል ሁሉንም የክፍያ ተዛማጅ አገልግሎቶችን ይይዛል
 """
 
@@ -201,12 +201,13 @@ class PaymentService:
                 'phone_number': user.get('phone', ''),
                 'tx_ref': payment['transaction_id'],
                 'callback_url': 'https://your-domain.com/chapa-callback',
-                'return_url': 'https://t.me/your_bot',
                 'customization': {
-                    'title': 'ዘናጭ ቦት ክፍያ',
+                    'title': 'ሂክማ ኦንላይን ሾፒንግ ክፍያ',
                     'description': f'ትዕዛዝ #{order["order_number"]}'
                 }
             }
+            if config.bot.BOT_USERNAME:
+                payload['return_url'] = f"https://t.me/{config.bot.BOT_USERNAME.lstrip('@')}"
             
             # ወደ ቻፓ መላክ
             headers = {
@@ -295,9 +296,10 @@ class PaymentService:
                 'merchant_id': config.payment.TELEBIRR_MERCHANT_ID,
                 'transaction_id': payment['transaction_id'],
                 'amount': str(payment['amount']),
-                'currency': payment['currency'],
-                'return_url': 'https://t.me/your_bot'
+                'currency': payment['currency']
             }
+            if config.bot.BOT_USERNAME:
+                payload['return_url'] = f"https://t.me/{config.bot.BOT_USERNAME.lstrip('@')}"
             
             headers = {
                 'Authorization': f'Bearer {self.telebirr_api_key}',

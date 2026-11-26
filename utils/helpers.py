@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """
-ዘናጭ ቦት - ረዳት ተግባራት
+Hikma Online Shopping Bot - ረዳት ተግባራት
 ይህ ፋይል የተለያዩ ረዳት ተግባራትን ይይዛል
 """
 
@@ -55,7 +55,7 @@ def create_default_language_files():
     if not am_file.exists():
         with open(am_file, 'w', encoding='utf-8') as f:
             json.dump({
-                'welcome': "እንኳን ወደ ዘናጭ ልብስ ቤት በሰላም መጡ!",
+                'welcome': "እንኳን ወደ ሂክማ ኦንላይን ሾፒንግ በሰላም መጡ!",
                 'men': "👕 የወንድ ልብሶች",
                 'women': "👗 የሴት ልብሶች",
                 'contact': "📍 አድራሻ እና ስልክ",
@@ -88,7 +88,7 @@ def create_default_language_files():
     if not en_file.exists():
         with open(en_file, 'w', encoding='utf-8') as f:
             json.dump({
-                'welcome': "Welcome to Zenach Boutique!",
+                'welcome': "Welcome to Hikma Online Shopping!",
                 'men': "👕 Men's Clothing",
                 'women': "👗 Women's Clothing",
                 'contact': "📍 Address & Phone",

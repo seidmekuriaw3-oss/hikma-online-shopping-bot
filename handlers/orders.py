@@ -2,7 +2,7 @@
 # pyright: reportOptionalMemberAccess=false, reportArgumentType=false, reportOptionalSubscript=false, reportAttributeAccessIssue=false
 
 """
-ዘናጭ ቦት - የትዕዛዝ እጅ አያያዝ
+Hikma Online Shopping Bot - የትዕዛዝ እጅ አያያዝ
 ይህ ፋይል ሁሉንም የትዕዛዝ እጅ አያያዞችን ይይዛል
 """
 

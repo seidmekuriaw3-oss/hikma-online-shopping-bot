@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """
-ዘናጭ ቦት - ውቅር ፋይል
+Hikma Online Shopping Bot - ውቅር ፋይል
 ይህ ፋይል ሁሉንም የቦቱን ውቅር ተለዋዋጮች ይዟል
 """
 
@@ -12,11 +12,11 @@ from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 from dotenv import load_dotenv
 
-# የአካባቢ ተለዋዋጮችን መጫን
-load_dotenv()
-
 # የፕሮጀክቱ ሥር ማውጫ
-BASE_DIR = Path(__file__).parent
+BASE_DIR = Path(__file__).resolve().parent
+
+# የአካባቢ ተለዋዋጮችን ከፕሮጀክቱ .env ፋይል መጫን
+load_dotenv(BASE_DIR / '.env')
 
 
 @dataclass
@@ -25,6 +25,7 @@ class BotConfig:
     
     # ቶከን
     TOKEN: str = os.getenv('BOT_TOKEN', '')
+    ADMIN_USERNAME: str = os.getenv('ADMIN_USERNAME', '').strip().lstrip('@')
     
     # አስተዳዳሪዎች
     ADMIN_IDS: List[int] = field(default_factory=lambda: [
@@ -32,8 +33,8 @@ class BotConfig:
     ])
     
     # የቦት ስም
-    BOT_NAME: str = os.getenv('BOT_NAME', 'ዘናጭ ቦት')
-    BOT_USERNAME: str = os.getenv('BOT_USERNAME', 'ZenachBot')
+    BOT_NAME: str = os.getenv('BOT_NAME', 'ሂክማ ኦንላይን ሾፒንግ')
+    BOT_USERNAME: str = os.getenv('BOT_USERNAME', '')
     
     # ዌብሁክ ውቅር
     USE_WEBHOOK: bool = os.getenv('USE_WEBHOOK', 'False').lower() == 'true'
@@ -54,7 +55,7 @@ class BotConfig:
     ])
     
     # ደህንነት
-    SECRET_KEY: str = os.getenv('SECRET_KEY', 'your-secret-key-change-this')
+    SECRET_KEY: str = os.getenv('SECRET_KEY', '')
     
     def validate(self) -> bool:
         """ውቅሩን ማረጋገጥ"""
@@ -62,8 +63,8 @@ class BotConfig:
             raise ValueError("❌ BOT_TOKEN አልተገኘም!")
         if not self.ADMIN_IDS:
             raise ValueError("❌ ADMIN_IDS አልተገኘም!")
-        if os.getenv('ENVIRONMENT', 'development').lower() == 'production' and self.SECRET_KEY == 'your-secret-key-change-this':
-            raise ValueError("❌ SECRET_KEY መቀየር አለበት!")
+        if os.getenv('ENVIRONMENT', 'development').lower() == 'production' and not self.SECRET_KEY:
+            raise ValueError("❌ SECRET_KEY ማዘጋጀት አለበት!")
         if self.USE_WEBHOOK and self.WEBHOOK_URL == 'https://example.com':
             raise ValueError("❌ WEBHOOK_URL መዘጋጀት አለበት!")
         return True
@@ -101,6 +102,11 @@ class PaymentConfig:
     TELEBIRR_API_KEY: str = os.getenv('TELEBIRR_API_KEY', '')
     TELEBIRR_API_URL: str = os.getenv('TELEBIRR_API_URL', 'https://api.telegram.org')
     TELEBIRR_MERCHANT_ID: str = os.getenv('TELEBIRR_MERCHANT_ID', '')
+
+    BANK_NAME: str = os.getenv('BANK_NAME', '')
+    BANK_ACCOUNT_HOLDER: str = os.getenv('BANK_ACCOUNT_HOLDER', '')
+    BANK_ACCOUNT_NUMBER: str = os.getenv('BANK_ACCOUNT_NUMBER', '')
+    BANK_BUSINESS_CODE: str = os.getenv('BANK_BUSINESS_CODE', '')
     
     # ገደቦች
     MIN_AMOUNT: float = float(os.getenv('MIN_AMOUNT', 10.0))
@@ -126,7 +132,7 @@ class NotificationConfig:
     
     # ኤስኤምኤስ
     SMS_API_KEY: str = os.getenv('SMS_API_KEY', '')
-    SMS_SENDER_ID: str = os.getenv('SMS_SENDER_ID', 'ZenachBot')
+    SMS_SENDER_ID: str = os.getenv('SMS_SENDER_ID', 'HikmaBot')
     SMS_API_URL: str = os.getenv('SMS_API_URL', '')
     
     # ቦት ማስታወቂያ
@@ -230,7 +236,7 @@ class OrderConfig:
     ])
     
     # የትዕዛዝ ቁጥር ቅድመ-ቅጥያ
-    ORDER_PREFIX: str = os.getenv('ORDER_PREFIX', 'ZEN')
+    ORDER_PREFIX: str = os.getenv('ORDER_PREFIX', 'HIK')
     
     # ገደቦች
     MAX_ITEMS_PER_ORDER: int = int(os.getenv('MAX_ITEMS_PER_ORDER', 50))
@@ -323,7 +329,7 @@ config = Config()
 # ለሙከራ
 if __name__ == '__main__':
     print("=" * 50)
-    print("📋 የዘናጭ ቦት ውቅር")
+    print("📋 የሂክማ ኦንላይን ሾፒንግ ውቅር")
     print("=" * 50)
     
     print(f"\n🤖 የቦት ስም: {config.bot.BOT_NAME}")

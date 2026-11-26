@@ -49,6 +49,9 @@ def _fake_bot():
         def reply_to(self, *args, **kwargs):
             return True
 
+        def register_next_step_handler(self, *args, **kwargs):
+            return True
+
     return FakeBot()
 
 

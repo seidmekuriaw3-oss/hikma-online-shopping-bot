@@ -4,7 +4,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://zenach:zenach_password@postgres:5432/zenach
+      DATABASE_URL: postgresql://${POSTGRES_USER:-hikma}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-hikma}
     depends_on:
       postgres:
         condition: service_healthy
@@ -14,13 +14,13 @@ services:
     ports:
       - "5433:5432"
     environment:
-      POSTGRES_DB: zenach
-      POSTGRES_USER: zenach
-      POSTGRES_PASSWORD: zenach_password
+      POSTGRES_DB: ${POSTGRES_DB:-hikma}
+      POSTGRES_USER: ${POSTGRES_USER:-hikma}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U zenach -d zenach"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10

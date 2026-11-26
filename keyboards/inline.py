@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
 
 """
-ዘናጭ ቦት - Inline ኪቦርዶች
+Hikma Online Shopping Bot - Inline ኪቦርዶች
 ይህ ፋይል ሁሉንም የ Inline ኪቦርድ መፍጠሪያ ተግባራትን ይይዛል
 """
 
 from typing import Optional, List
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+from config import config
 from utils.helpers import get_text
 
 
@@ -318,30 +319,16 @@ def get_filter_keyboard(filters: List[str], lang: str = 'am') -> InlineKeyboardM
 
 
 def get_social_keyboard(lang: str = 'am') -> InlineKeyboardMarkup:
-    """የማህበራዊ መገናኛ ኪቦርድ መፍጠር"""
-    markup = InlineKeyboardMarkup(row_width=2)
-    
-    markup.add(
-        InlineKeyboardButton(
-            "📱 " + get_text(lang, 'telegram'),
-            url="https://t.me/zenach_bot"
-        ),
-        InlineKeyboardButton(
-            "📸 " + get_text(lang, 'instagram'),
-            url="https://instagram.com/zenach"
+    """Build social links using the configured Telegram admin account."""
+    markup = InlineKeyboardMarkup(row_width=1)
+
+    if config.bot.ADMIN_USERNAME:
+        markup.add(
+            InlineKeyboardButton(
+                "📱 " + get_text(lang, 'telegram'),
+                url=f"https://t.me/{config.bot.ADMIN_USERNAME}"
+            )
         )
-    )
-    
-    markup.add(
-        InlineKeyboardButton(
-            "📘 " + get_text(lang, 'facebook'),
-            url="https://facebook.com/zenach"
-        ),
-        InlineKeyboardButton(
-            "🐦 " + get_text(lang, 'twitter'),
-            url="https://twitter.com/zenach"
-        )
-    )
     
     markup.add(
         InlineKeyboardButton(

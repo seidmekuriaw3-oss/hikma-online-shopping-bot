@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 
 
-def setup_logger(name: str = 'zenach_bot') -> logging.Logger:
+def setup_logger(name: str = 'hikma_bot') -> logging.Logger:
 	"""Configure and return a named application logger."""
 	logger = logging.getLogger(name)
 	if logger.handlers:
@@ -22,21 +22,21 @@ def setup_logger(name: str = 'zenach_bot') -> logging.Logger:
 	return logger
 
 
-def get_logger(name: str = 'zenach_bot') -> logging.Logger:
+def get_logger(name: str = 'hikma_bot') -> logging.Logger:
 	return setup_logger(name)
 
 
-def log_error(message: str, name: str = 'zenach_bot') -> None:
+def log_error(message: str, name: str = 'hikma_bot') -> None:
 	get_logger(name).error(message)
 
 
-def log_info(message: str, name: str = 'zenach_bot') -> None:
+def log_info(message: str, name: str = 'hikma_bot') -> None:
 	get_logger(name).info(message)
 
 
-def log_warning(message: str, name: str = 'zenach_bot') -> None:
+def log_warning(message: str, name: str = 'hikma_bot') -> None:
 	get_logger(name).warning(message)
 
 
-def log_debug(message: str, name: str = 'zenach_bot') -> None:
+def log_debug(message: str, name: str = 'hikma_bot') -> None:
 	get_logger(name).debug(message)

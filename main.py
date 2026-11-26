@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-ዘናጭ ቦት - ዋና የመግቢያ ፋይል
+Hikma Online Shopping Bot - ዋና የመግቢያ ፋይል
 ይህ ፋይል ሁሉንም ሞጁሎች ያስጀምራል እና ቦቱን ያስነሳል
 """
 
@@ -186,7 +186,7 @@ def main():
     
     # የቦት መጀመሪያ መልዕክት
     logger.info("=" * 60)
-    logger.info(f"🤖 ዘናጭ ቦት እየሰራ ነው...")
+    logger.info("🤖 Hikma Online Shopping Bot is running...")
     logger.info(f"📱 የቦት ስም: {bot.get_me().first_name}")
     logger.info(f"🆔 የቦት ID: {bot.get_me().id}")
     logger.info("🗄️ የውሂብ ጎታ: PostgreSQL")

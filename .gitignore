@@ -1,5 +1,6 @@
 .env
 .env.*
+!.env.example
 .venv/
 venv/
 __pycache__/
@@ -22,3 +23,5 @@ build/
 dist/
 coverage/
 *.sqlite3
+*.sqlite
+*.db

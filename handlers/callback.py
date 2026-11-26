@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """
-ዘናጭ ቦት - የጥሪ እጅ አያያዝ
+Hikma Online Shopping Bot - የጥሪ እጅ አያያዝ
 ይህ ፋይል ሁሉንም የ Inline ኪቦርድ ጥሪ እጅ አያያዞችን ይይዛል
 """
 

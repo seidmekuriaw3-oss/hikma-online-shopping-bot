@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """
-ዘናጭ ቦት - የመጀመሪያ ሜኑ እጅ አያያዝ
+Hikma Online Shopping Bot - የመጀመሪያ ሜኑ እጅ አያያዝ
 ይህ ፋይል የ /start ትዕዛዝ እና የመጀመሪያ ሜኑ እጅ አያያዞችን ይይዛል
 """
 
@@ -19,6 +19,18 @@ from keyboards.inline import get_start_keyboard
 from services.notifications import notify_admin
 
 logger = logging.getLogger(__name__)
+
+
+def show_welcome(chat_id: int, user_id: int, db: Database, bot: TeleBot):
+    """Send the localized welcome message and main menu."""
+    lang = get_user_lang(db, user_id)
+    user = db.get_user(user_id)
+    welcome_msg = get_text(lang, 'welcome_msg')
+    first_name = user['first_name'] if user else 'ደንበኛ'
+    msg = f"👋 *እንኳን ደህና መጡ {first_name}!*\n\n"
+    msg += f"{welcome_msg}\n\n"
+    msg += "📌 ከታች ካሉት አዝራሮች ይምረጡ:"
+    bot.send_message(chat_id, msg, reply_markup=get_main_menu(user_id, db))
 
 
 def register(bot: TeleBot, db: Database):
@@ -138,6 +150,24 @@ def register(bot: TeleBot, db: Database):
             reply_markup=markup,
             parse_mode='Markdown'
         )
+
+    @bot.message_handler(commands=['lang'])
+    def language_command(message: Message):
+        bot.send_message(
+            message.chat.id,
+            "🌍 ቋንቋ ይምረጡ / Choose Language:",
+            reply_markup=get_language_menu()
+        )
+
+    @bot.message_handler(
+        func=lambda message: message.text in ('🇪🇹 አማርኛ', '🇬🇧 English')
+    )
+    def handle_language_text(message: Message):
+        lang = 'am' if message.text == '🇪🇹 አማርኛ' else 'en'
+        user_id = message.from_user.id
+        db.update_user(user_id, lang=lang)
+        db.log_activity(user_id, 'set_lang', f'Language: {lang}')
+        show_welcome(message.chat.id, user_id, db, bot)
     
     # ==================== የመጀመሪያ ሜኑ ማሳየት ====================
     
@@ -153,52 +183,6 @@ def register(bot: TeleBot, db: Database):
         
         show_welcome(call.message.chat.id, user_id, db, bot)
     
-    # ==================== ረዳት ተግባራት ====================
-    
-    def show_welcome(chat_id: int, user_id: int, db: Database, bot: TeleBot):
-        """የእንኳን ደህና መጡ መልዕክት እና ዋና ሜኑ ማሳየት"""
-        lang = get_user_lang(db, user_id)
-        user = db.get_user(user_id)
-        
-        # የእንኳን ደህና መጡ መልዕክት
-        welcome_msg = get_text(lang, 'welcome_msg')
-        
-        # የተጠቃሚ ስም
-        first_name = user['first_name'] if user else 'ደንበኛ'
-        
-        # የተቀናበረ መልዕክት
-        msg = f"👋 *እንኳን ደህና መጡ {first_name}!*\n\n"
-        msg += f"{welcome_msg}\n\n"
-        msg += f"📌 ከታች ካሉት አዝራሮች ይምረጡ:"
-        
-        # ዋና ሜኑ ማግኘት
-        markup = get_main_menu(user_id, db)
-        
-        bot.send_message(
-            chat_id,
-            msg,
-            reply_markup=markup
-        )
-    
-    # ==================== መጀመሪያ ላይ ማሳወቅ ====================
-    
-    # ቦቱ ሲጀመር ለአስተዳዳሪዎች ማሳወቅ
-    @bot.message_handler(commands=['start'], func=lambda m: m.from_user.id in config.bot.ADMIN_IDS)
-    def admin_start_notification(message: Message):
-        """አስተዳዳሪ ሲጀምር ማሳወቅ"""
-        user_id = message.from_user.id
-        bot.send_message(
-            user_id,
-            "🔐 *የአስተዳዳሪ ፓነል ተዘጋጅቷል!*\n\n"
-            "⚙️ /admin - ወደ አስተዳዳሪ ፓነል\n"
-            "📊 /stats - ስታቲስቲክስ ለማየት\n"
-            "📋 /orders - ትዕዛዞችን ለማስተዳደር\n"
-            "📦 /products - ምርቶችን ለማስተዳደር\n"
-            "👥 /users - ተጠቃሚዎችን ለማስተዳደር",
-            parse_mode='Markdown'
-        )
-
-
 # ==================== ተጨማሪ ትዕዛዞች ====================
 
 def register_additional_commands(bot: TeleBot, db: Database):

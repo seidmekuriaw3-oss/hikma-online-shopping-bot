@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """
-ዘናጭ ቦት - የአስተዳዳሪ ፓነል እጅ አያያዝ
+Hikma Online Shopping Bot - የአስተዳዳሪ ፓነል እጅ አያያዝ
 ይህ ፋይል ሁሉንም የአስተዳዳሪ ፓነል እጅ አያያዞችን ይይዛል
 """
 
@@ -56,13 +56,13 @@ def start_add_product(message: Message, db: Database, bot: TeleBot):
     user_id = message.from_user.id
     admin_states[user_id] = {'action': 'add_product', 'step': 1, 'data': {}}
 
-    bot.send_message(
+    prompt = bot.send_message(
         message.chat.id,
         "📝 *አዲስ ምርት መጨመር*\n\n"
         "የምርቱን ስም በአማርኛ ያስገቡ:",
         parse_mode='Markdown'
     )
-    bot.register_next_step_handler(message, process_add_product_name, db, bot)
+    bot.register_next_step_handler(prompt, process_add_product_name, db, bot)
 
 
 def process_add_product_name(message: Message, db: Database, bot: TeleBot):
@@ -302,6 +302,24 @@ def handle_admin_photo(message: Message, db: Database, bot: TeleBot):
 
 def register(bot: TeleBot, db: Database):
     """የአስተዳዳሪ እጅ አያያዞችን መመዝገብ"""
+
+    @bot.message_handler(commands=['add'])
+    def add_product_command(message: Message):
+        if not is_admin(message.from_user.id, config.bot.ADMIN_IDS):
+            bot.reply_to(message, "⛔ ይህን ለማድረግ ፈቃድ የለዎትም!")
+            return
+        start_add_product(message, db, bot)
+
+    @bot.message_handler(commands=['delete'])
+    def delete_product_command(message: Message):
+        if not is_admin(message.from_user.id, config.bot.ADMIN_IDS):
+            bot.reply_to(message, "⛔ ይህን ለማድረግ ፈቃድ የለዎትም!")
+            return
+        parts = (message.text or '').split(maxsplit=1)
+        if len(parts) != 2:
+            bot.reply_to(message, "Usage: /delete <id>")
+            return
+        process_delete_product(message, db, bot, parts[1])
     
     # ==================== የአስተዳዳሪ ፓነል ====================
     
@@ -630,13 +648,13 @@ def register(bot: TeleBot, db: Database):
         user_id = message.from_user.id
         admin_states[user_id] = {'action': 'add_product', 'step': 1, 'data': {}}
         
-        bot.send_message(
+        prompt = bot.send_message(
             message.chat.id,
             "📝 *አዲስ ምርት መጨመር*\n\n"
             "የምርቱን ስም በአማርኛ ያስገቡ:",
             parse_mode='Markdown'
         )
-        bot.register_next_step_handler(message, process_add_product_name, db, bot)
+        bot.register_next_step_handler(prompt, process_add_product_name, db, bot)
     
     def process_add_product_name(message: Message, db: Database, bot: TeleBot):
         """የምርት ስም በአማርኛ ማስኬድ"""
@@ -965,8 +983,40 @@ def start_edit_product(message: Message, db: Database, bot: TeleBot):
 
 def start_delete_product(message: Message, db: Database, bot: TeleBot):
     """ምርት መሰረዝ ሂደት መጀመር"""
-    bot.send_message(message.chat.id, "🗑️ የምርት አይዲ ያስገቡ:")
+    prompt = bot.send_message(message.chat.id, "🗑️ የምርት አይዲ ያስገቡ:")
+    bot.register_next_step_handler(prompt, process_delete_product, db, bot)
     return "delete product started"
+
+
+def process_delete_product(
+    message: Message,
+    db: Database,
+    bot: TeleBot,
+    product_id_text: Optional[str] = None,
+):
+    """Validate and delete a product requested by an administrator."""
+    if not is_admin(message.from_user.id, config.bot.ADMIN_IDS):
+        bot.reply_to(message, "⛔ ይህን ለማድረግ ፈቃድ የለዎትም!")
+        return False
+
+    value = product_id_text or (message.text or '').strip()
+    try:
+        product_id = int(value)
+    except ValueError:
+        bot.reply_to(message, "❌ እባክዎ ትክክለኛ የምርት ID ያስገቡ።")
+        return False
+
+    if product_id <= 0 or not db.get_product(product_id):
+        bot.reply_to(message, "❌ ይህ ምርት አልተገኘም።")
+        return False
+
+    if not db.delete_product(product_id):
+        bot.reply_to(message, "❌ ምርቱን መሰረዝ አልተቻለም።")
+        return False
+
+    bot.reply_to(message, f"✅ ምርት #{product_id} ተሰርዟል።")
+    db.log_activity(message.from_user.id, 'delete_product', f'Product ID: {product_id}')
+    return True
 
 
 def show_low_stock(message: Message, db: Database, bot: TeleBot):

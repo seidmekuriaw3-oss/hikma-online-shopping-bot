@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """
-ዘናጭ ቦት - የፋይል ማከማቻ አገልግሎት
+Hikma Online Shopping Bot - የፋይል ማከማቻ አገልግሎት
 ይህ ፋይል የፋይል ማከማቻ ተዛማጅ አገልግሎቶችን ይይዛል
 """
 
@@ -296,7 +296,7 @@ class StorageService:
             backup_dir.mkdir(parents=True, exist_ok=True)
             
             # PostgreSQL ምትኬ ማውጣት
-            backup_db = backup_dir / 'zenach.sql'
+            backup_db = backup_dir / 'hikma.sql'
             subprocess.run(
                 ['pg_dump', config.database.DB_URL, '--file', str(backup_db)],
                 check=True,
@@ -343,7 +343,7 @@ class StorageService:
                 return False
             
             # PostgreSQL ውሂብ ጎታ መመለስ
-            backup_db = full_path / 'zenach.sql'
+            backup_db = full_path / 'hikma.sql'
             if backup_db.exists():
                 subprocess.run(
                     ['psql', config.database.DB_URL, '--file', str(backup_db)],

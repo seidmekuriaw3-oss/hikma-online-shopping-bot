@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """
-ዘናጭ ቦት - የውሂብ ጎታ ሞጁል
+Hikma Online Shopping Bot - የውሂብ ጎታ ሞጁል
 ይህ ፋይል ሁሉንም የውሂብ ጎታ ግንኙነቶችን እና ስራዎችን ይይዛል
 """
 
@@ -816,8 +816,8 @@ class DatabaseMixin:
     def delete_product(self, product_id: int) -> bool:
         """ምርት መሰረዝ"""
         try:
-            self.execute("DELETE FROM products WHERE id = ?", (product_id,))
-            return True
+            cursor = self.execute("DELETE FROM products WHERE id = ?", (product_id,))
+            return cursor.rowcount > 0
         except Exception as e:
             logger.error(f"❌ ምርት መሰረዝ አልተቻለም: {e}")
             return False

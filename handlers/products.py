@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """
-ዘናጭ ቦት - የምርት እጅ አያያዝ
+Hikma Online Shopping Bot - የምርት እጅ አያያዝ
 ይህ ፋይል ሁሉንም የምርት እጅ አያያዞችን ይይዛል
 """
 
@@ -74,7 +74,9 @@ def register(bot: TeleBot, db: Database):
     
     # ==================== ምርት ማሳየት ====================
     
-    @bot.callback_query_handler(func=lambda call: call.data.startswith('product_'))
+    @bot.callback_query_handler(func=lambda call: call.data.startswith((
+        'product_view_', 'product_nav_', 'product_buy_', 'product_review_'
+    )))
     def handle_product_navigation(call: CallbackQuery):
         """የምርት አሰሳ አያያዝ"""
         user_id = call.from_user.id

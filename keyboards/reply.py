@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """
-ዘናጭ ቦት - Reply ኪቦርዶች
+Hikma Online Shopping Bot - Reply ኪቦርዶች
 ይህ ፋይል ሁሉንም የ Reply ኪቦርድ መፍጠሪያ ተግባራትን ይይዛል
 """
 
