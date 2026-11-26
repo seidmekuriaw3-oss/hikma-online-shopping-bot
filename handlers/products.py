@@ -20,6 +20,7 @@ from database import Database
 from utils.helpers import get_text, get_user_lang, format_currency
 from keyboards.inline import (
     get_product_keyboard, get_rating_keyboard, get_browse_product_keyboard,
+    get_storefront_categories_keyboard,
 )
 from services.notifications import notify_admins
 
@@ -126,6 +127,10 @@ def show_category_products(message: Message, category: str, db: Database, bot: T
     lang = get_user_lang(db, user_id)
     products = db.get_products(category=category, limit=20, offset=0)
     if not products:
+        if category == 'hot_deals':
+            return _render_category_menu(
+                message.chat.id, lang, db, bot
+            )
         return bot.send_message(
             message.chat.id,
             get_text(lang, 'no_products_in_category'),
@@ -133,6 +138,53 @@ def show_category_products(message: Message, category: str, db: Database, bot: T
     return show_product_card(
         message.chat.id, products[0], 0, len(products), category, lang, bot
     )
+
+
+def _category_menu_text(lang: str) -> str:
+    if lang == 'am':
+        return "🛍️ ወደ ሂክማ ሱቅ እንኳን ደህና መጡ!\n\nምድብ ይምረጡ፦"
+    return "🛍️ Welcome to the Hikma store!\n\nChoose a category:"
+
+
+def _render_category_menu(
+    chat_id: int,
+    lang: str,
+    db: Database,
+    bot: TeleBot,
+    message_id: Optional[int] = None,
+    is_photo_message: bool = False,
+):
+    count_method = getattr(db, 'get_product_category_counts', None)
+    counts = count_method() if callable(count_method) else {}
+    text = _category_menu_text(lang)
+    keyboard = get_storefront_categories_keyboard(counts, lang)
+
+    if message_id is not None:
+        try:
+            if is_photo_message:
+                bot.edit_message_caption(
+                    text,
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    reply_markup=keyboard,
+                )
+            else:
+                bot.edit_message_text(
+                    text,
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    reply_markup=keyboard,
+                )
+            return
+        except Exception:
+            logger.exception("Could not replace the current message with categories")
+    return bot.send_message(chat_id, text, reply_markup=keyboard)
+
+
+def show_category_menu(message: Message, db: Database, bot: TeleBot):
+    """Display the storefront's category picker."""
+    lang = get_user_lang(db, message.from_user.id)
+    return _render_category_menu(message.chat.id, lang, db, bot)
 
 
 def search_products(message: Message, query: str, db: Database, bot: TeleBot):
@@ -160,6 +212,19 @@ def register(bot: TeleBot, db: Database):
     """የምርት እጅ አያያዞችን መመዝገብ"""
     
     # ==================== ምርቶችን በምድብ ማሳየት ====================
+
+    @bot.callback_query_handler(func=lambda call: call.data == 'browse_categories')
+    def handle_browse_categories(call: CallbackQuery):
+        lang = get_user_lang(db, call.from_user.id)
+        _render_category_menu(
+            call.message.chat.id,
+            lang,
+            db,
+            bot,
+            message_id=call.message.message_id,
+            is_photo_message=getattr(call.message, 'content_type', None) == 'photo',
+        )
+        bot.answer_callback_query(call.id)
     
     @bot.callback_query_handler(func=lambda call: call.data.startswith('category_'))
     def handle_category_selection(call: CallbackQuery):
@@ -196,9 +261,27 @@ def register(bot: TeleBot, db: Database):
 
         products = db.get_products(category=category, limit=20, offset=0)
         if not products or not 0 <= index < len(products):
+            if category == 'hot_deals' and not products:
+                _render_category_menu(
+                    call.message.chat.id,
+                    lang,
+                    db,
+                    bot,
+                    message_id=call.message.message_id,
+                    is_photo_message=getattr(call.message, 'content_type', None) == 'photo',
+                )
+                bot.answer_callback_query(
+                    call.id,
+                    "አሁን ልዩ ቅናሽ የለም። ሌላ ምድብ ይምረጡ።"
+                    if lang == 'am'
+                    else "No active deals right now. Choose another category.",
+                )
+                return
             bot.answer_callback_query(call.id, get_text(lang, 'no_more_products'))
             return
 
+        is_photo_message = getattr(call.message, 'content_type', None) == 'photo'
+        is_category_menu = getattr(call.message, 'text', None) == _category_menu_text(lang)
         show_product_card(
             call.message.chat.id,
             products[index],
@@ -207,8 +290,12 @@ def register(bot: TeleBot, db: Database):
             category,
             lang,
             bot,
-            message_id=call.message.message_id,
-            is_photo_message=getattr(call.message, 'content_type', None) == 'photo',
+            message_id=(
+                None
+                if is_category_menu
+                else call.message.message_id
+            ),
+            is_photo_message=is_photo_message,
         )
         bot.answer_callback_query(call.id)
 

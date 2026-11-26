@@ -21,7 +21,9 @@ from .inline import (
     get_admin_keyboard,
     get_confirm_keyboard,
     get_main_keyboard,
-    get_back_keyboard
+    get_back_keyboard,
+    get_storefront_categories_keyboard,
+    get_admin_product_category_keyboard,
 )
 
 from .admin import (
@@ -50,6 +52,8 @@ __all__ = [
     'get_confirm_keyboard',
     'get_main_keyboard',
     'get_back_keyboard',
+    'get_storefront_categories_keyboard',
+    'get_admin_product_category_keyboard',
     
     # Admin keyboards
     'get_admin_main_keyboard',

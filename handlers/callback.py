@@ -8,6 +8,35 @@ from database import Database
 from utils.helpers import get_text, get_user_lang, format_currency
 
 
+def show_wishlist(chat_id: int, user_id: int, db: Database, bot: TeleBot):
+    lang = get_user_lang(db, user_id)
+    products = db.execute(
+        "SELECT p.* FROM wishlists w JOIN products p ON w.product_id = p.id "
+        "WHERE w.user_id = %s ORDER BY w.created_at DESC",
+        (user_id,),
+    ).fetchall()
+    markup = InlineKeyboardMarkup(row_width=1)
+    if not products:
+        markup.add(InlineKeyboardButton(
+            "🛍️ ምርቶችን ያስሱ" if lang == 'am' else "🛍️ Browse Products",
+            callback_data="browse_categories",
+        ))
+        text = "❤️ ተወዳጅ ምርቶች የሉም" if lang == 'am' else "❤️ Your wishlist is empty"
+    else:
+        text = "❤️ ተወዳጅ ምርቶች" if lang == 'am' else "❤️ Your Wishlist"
+        for product in products[:20]:
+            name = product.get('name_am') if lang == 'am' else product.get('name_en')
+            markup.add(InlineKeyboardButton(
+                f"{name or product.get('name_am')} · {format_currency(product['price'])}",
+                callback_data=f"product_view_{product['id']}",
+            ))
+    markup.add(InlineKeyboardButton(
+        "🔙 ዋና ሜኑ" if lang == 'am' else "🔙 Main Menu",
+        callback_data="main_menu",
+    ))
+    return bot.send_message(chat_id, text, reply_markup=markup)
+
+
 def register(bot: TeleBot, db: Database):
     @bot.callback_query_handler(func=lambda call: call.data == 'show_discounts')
     def handle_show_discounts(call: CallbackQuery):
@@ -66,32 +95,7 @@ def register(bot: TeleBot, db: Database):
     @bot.callback_query_handler(func=lambda call: call.data == 'show_wishlist')
     def handle_show_wishlist(call: CallbackQuery):
         user_id = call.from_user.id
-        lang = get_user_lang(db, user_id)
-        products = db.execute(
-            "SELECT p.* FROM wishlists w JOIN products p ON w.product_id = p.id "
-            "WHERE w.user_id = %s ORDER BY w.created_at DESC",
-            (user_id,),
-        ).fetchall()
-        markup = InlineKeyboardMarkup(row_width=1)
-        if not products:
-            markup.row(
-                InlineKeyboardButton("👕 የወንድ ልብሶች" if lang == 'am' else "👕 Men's Clothing", callback_data="category_Men"),
-                InlineKeyboardButton("👗 የሴት ልብሶች" if lang == 'am' else "👗 Women's Clothing", callback_data="category_Women"),
-            )
-            text = "❤️ ተወዳጅ ምርቶች የሉም" if lang == 'am' else "❤️ Your wishlist is empty"
-        else:
-            text = "❤️ ተወዳጅ ምርቶች" if lang == 'am' else "❤️ Your Wishlist"
-            for product in products[:20]:
-                name = product.get('name_am') if lang == 'am' else product.get('name_en')
-                markup.add(InlineKeyboardButton(
-                    f"{name or product.get('name_am')} · {format_currency(product['price'])}",
-                    callback_data=f"product_view_{product['id']}",
-                ))
-        markup.add(InlineKeyboardButton(
-            "🔙 ዋና ሜኑ" if lang == 'am' else "🔙 Main Menu",
-            callback_data="main_menu",
-        ))
-        bot.send_message(call.message.chat.id, text, reply_markup=markup)
+        show_wishlist(call.message.chat.id, user_id, db, bot)
         bot.answer_callback_query(call.id)
 
     @bot.callback_query_handler(func=lambda call: call.data in ('subscribe', 'unsubscribe'))

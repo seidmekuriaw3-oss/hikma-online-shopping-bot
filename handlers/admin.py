@@ -21,6 +21,7 @@ from utils.helpers import (
 )
 from keyboards.inline import (
     get_admin_keyboard, get_confirm_keyboard, get_admin_order_actions_keyboard,
+    get_admin_product_category_keyboard,
 )
 from services.notifications import notify_admins, send_broadcast
 
@@ -161,40 +162,62 @@ def process_add_product_size(message: Message, db: Database, bot: TeleBot):
     state = _ensure_add_product_state(user_id)
     state['data']['size'] = message.text.upper()
     state['step'] = 5
-
-    markup = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True, row_width=2)
-    markup.add("Men", "Women", "Accessories")
+    lang = get_user_lang(db, user_id)
 
     bot.send_message(
         message.chat.id,
-        "📂 የምርቱን ምድብ ይምረጡ:",
-        reply_markup=markup
+        "📂 የምርቱን ምድብ ይምረጡ ወይም ብጁ ምድብ ይጻፉ:"
+        if lang == 'am'
+        else "📂 Choose a product category or type a custom category:",
+        reply_markup=get_admin_product_category_keyboard(lang),
     )
     bot.register_next_step_handler(message, process_add_product_category, db, bot)
+
+
+def _finish_add_product_category(
+    user_id: int,
+    category: str,
+    chat_id: int,
+    db: Database,
+    bot: TeleBot,
+    step_source: Optional[Message] = None,
+    stock_handler=None,
+):
+    state = _ensure_add_product_state(user_id)
+    state['data']['category'] = category
+    state['step'] = 6
+    admin_uploading.discard(user_id)
+    prompt = bot.send_message(
+        chat_id,
+        "📦 የምርቱን የክምችት ብዛት ያስገቡ:"
+        if get_user_lang(db, user_id) == 'am'
+        else "📦 Enter the product stock quantity:",
+    )
+    bot.register_next_step_handler(
+        step_source or prompt,
+        stock_handler or process_add_product_stock,
+        db,
+        bot,
+    )
 
 
 def process_add_product_category(message: Message, db: Database, bot: TeleBot):
     """የምርት ምድብ ማስኬድ"""
     user_id = message.from_user.id
-
-    if message.text not in ['Men', 'Women', 'Accessories']:
+    category = (message.text or '').strip()
+    if not category:
         bot.send_message(
             message.chat.id,
-            "❌ እባክዎ ከላይ ካሉት ይምረጡ!"
+            "❌ እባክዎ ምድብ ይምረጡ ወይም ይጻፉ።"
+            if get_user_lang(db, user_id) == 'am'
+            else "❌ Select a category or type a custom category.",
         )
         bot.register_next_step_handler(message, process_add_product_category, db, bot)
         return
 
-    state = _ensure_add_product_state(user_id)
-    state['data']['category'] = message.text
-    state['step'] = 6
-
-    bot.send_message(
-        message.chat.id,
-        "📦 የምርቱን የክምችት ብዛት ያስገቡ:"
+    _finish_add_product_category(
+        user_id, category, message.chat.id, db, bot, step_source=message
     )
-    admin_uploading.clear()
-    bot.register_next_step_handler(message, process_add_product_stock, db, bot)
 
 
 def process_add_product_stock(message: Message, db: Database, bot: TeleBot):
@@ -378,7 +401,10 @@ def register(bot: TeleBot, db: Database):
     
     # ==================== የአስተዳዳሪ ፓነል ====================
     
-    @bot.message_handler(func=lambda m: m.text in ['⚙️ አስተዳደር', '⚙️ Admin', 'አስተዳደር ⚙️', 'Admin ⚙️'])
+    @bot.message_handler(func=lambda m: m.text in [
+        '⚙️ አስተዳደር', '⚙️ Admin', 'አስተዳደር ⚙️', 'Admin ⚙️',
+        '⚙️ አስተዳዳሪ', '⚙️ Admin Panel',
+    ])
     def show_admin_panel(message: Message, user_id: Optional[int] = None):
         """የአስተዳዳሪ ፓነል ማሳየት"""
         user_id = user_id if user_id is not None else message.from_user.id
@@ -414,6 +440,31 @@ def register(bot: TeleBot, db: Database):
             reply_markup=markup,
             parse_mode='Markdown'
         )
+
+    @bot.callback_query_handler(
+        func=lambda call: call.data.startswith('add_product_category:')
+    )
+    def handle_add_product_category(call: CallbackQuery):
+        user_id = call.from_user.id
+        if not is_admin(user_id, config.bot.ADMIN_IDS):
+            bot.answer_callback_query(call.id, "⛔ ፈቃድ የለዎትም!")
+            return
+        category = call.data.split(':', 1)[1]
+        if category not in {
+            'women', 'men', 'kids', 'pajamas', 'shoes', 'accessories',
+        }:
+            bot.answer_callback_query(call.id, "❌ የተመረጠው ምድብ ትክክል አይደለም።")
+            return
+        bot.clear_step_handler_by_chat_id(call.message.chat.id)
+        _finish_add_product_category(
+            user_id,
+            category,
+            call.message.chat.id,
+            db,
+            bot,
+            stock_handler=process_add_product_stock,
+        )
+        bot.answer_callback_query(call.id)
     
     # ==================== የምርት አስተዳደር ====================
     
@@ -823,39 +874,41 @@ def register(bot: TeleBot, db: Database):
         state = _ensure_add_product_state(user_id)
         state['data']['size'] = message.text.upper()
         state['step'] = 5
-        
-        markup = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True, row_width=2)
-        markup.add("Men", "Women", "Accessories")
-        
+
+        lang = get_user_lang(db, user_id)
         bot.send_message(
             message.chat.id,
-            "📂 የምርቱን ምድብ ይምረጡ:",
-            reply_markup=markup
+            "📂 የምርቱን ምድብ ይምረጡ ወይም ብጁ ምድብ ይጻፉ:"
+            if lang == 'am'
+            else "📂 Choose a product category or type a custom category:",
+            reply_markup=get_admin_product_category_keyboard(lang),
         )
         bot.register_next_step_handler(message, process_add_product_category, db, bot)
     
     def process_add_product_category(message: Message, db: Database, bot: TeleBot):
         """የምርት ምድብ ማስኬድ"""
         user_id = message.from_user.id
-        
-        if message.text not in ['Men', 'Women', 'Accessories']:
+
+        category = (message.text or '').strip()
+        if not category:
             bot.send_message(
                 message.chat.id,
-                "❌ እባክዎ ከላይ ካሉት ይምረጡ!"
+                "❌ እባክዎ ምድብ ይምረጡ ወይም ይጻፉ။"
+                if get_user_lang(db, user_id) == 'am'
+                else "❌ Select a category or type a custom category.",
             )
             bot.register_next_step_handler(message, process_add_product_category, db, bot)
             return
-        
-        state = _ensure_add_product_state(user_id)
-        state['data']['category'] = message.text
-        state['step'] = 6
-        
-        bot.send_message(
+
+        _finish_add_product_category(
+            user_id,
+            category,
             message.chat.id,
-            "📦 የምርቱን የክምችት ብዛት ያስገቡ:"
+            db,
+            bot,
+            step_source=message,
+            stock_handler=process_add_product_stock,
         )
-        admin_uploading.clear()
-        bot.register_next_step_handler(message, process_add_product_stock, db, bot)
     
     def process_add_product_stock(message: Message, db: Database, bot: TeleBot):
         """የምርት ክምችት ማስኬድ"""

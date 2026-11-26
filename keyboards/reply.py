@@ -16,30 +16,23 @@ from config import config
 def get_main_menu(user_id: int, db: Database) -> ReplyKeyboardMarkup:
     """ዋና ሜኑ መፍጠር"""
     lang = get_user_lang(db, user_id)
-    
+
     markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    
-    # ዋና አዝራሮች
+
     buttons = [
-        KeyboardButton(get_text(lang, 'men')),
-        KeyboardButton(get_text(lang, 'women')),
-        KeyboardButton(get_text(lang, 'contact')),
-        KeyboardButton(get_text(lang, 'orders')),
-        KeyboardButton(get_text(lang, 'profile')),
-        KeyboardButton(get_text(lang, 'cart'))
+        KeyboardButton("🛍️ ምርቶች" if lang == 'am' else "🛍️ Products"),
+        KeyboardButton("🛒 ጋሪ" if lang == 'am' else "🛒 Cart"),
+        KeyboardButton("📋 ትዕዛዞቼ" if lang == 'am' else "📋 My Orders"),
+        KeyboardButton("❤️ ተወዳጆች" if lang == 'am' else "❤️ Wishlist"),
+        KeyboardButton("👤 መገለጫ" if lang == 'am' else "👤 Profile"),
+        KeyboardButton("📍 አድራሻ እና ስልክ" if lang == 'am' else "📍 Contact"),
     ]
-    
-    # የማስታወቂያ አዝራር
-    user = db.get_user(user_id)
-    if user and user.get('is_subscribed', 1):
-        buttons.append(KeyboardButton(get_text(lang, 'unsubscribe')))
-    else:
-        buttons.append(KeyboardButton(get_text(lang, 'subscribe')))
-    
-    # የአስተዳዳሪ አዝራር
+
     if user_id in config.bot.ADMIN_IDS:
-        buttons.append(KeyboardButton(get_text(lang, 'admin')))
-    
+        buttons.append(
+            KeyboardButton("⚙️ አስተዳዳሪ" if lang == 'am' else "⚙️ Admin Panel")
+        )
+
     markup.add(*buttons)
     return markup
 

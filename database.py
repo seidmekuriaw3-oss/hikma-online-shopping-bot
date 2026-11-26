@@ -21,6 +21,32 @@ from utils.logger import get_logger
 
 logger = get_logger('database')
 
+_PRODUCT_CATEGORY_ALIASES = {
+    'women': (
+        'women', 'woman', 'female', 'womens', "women's fashion",
+        'የሴት ልብሶች', 'የሴቶች ፋሽን',
+    ),
+    'men': (
+        'men', 'man', 'male', 'mens', "men's fashion",
+        'የወንድ ልብሶች', 'የወንዶች ፋሽን',
+    ),
+    'kids': ('kids', 'kid', 'baby', 'children', 'kids & baby', 'የልጆች አልባሳት'),
+    'pajamas': (
+        'pajamas', 'pyjamas', 'loungewear', 'pajamas & loungewear',
+        'ፒጃማ እና የቤት ልብስ',
+    ),
+    'shoes': ('shoes', 'shoe', 'footwear', 'shoes & footwear', 'ጫማዎች'),
+    'accessories': (
+        'accessories', 'accessory', 'bags', 'bags & accessories',
+        'ቦርሳ እና መዋቢያ',
+    ),
+}
+_PRODUCT_CATEGORY_LOOKUP = {
+    alias.casefold(): key
+    for key, aliases in _PRODUCT_CATEGORY_ALIASES.items()
+    for alias in aliases
+}
+
 
 def _decode_json(value):
     if isinstance(value, str):
@@ -32,6 +58,12 @@ def _json_default(value):
     if isinstance(value, Decimal):
         return float(value)
     raise TypeError(f'Object of type {type(value).__name__} is not JSON serializable')
+
+
+def _category_aliases(category: str):
+    normalized = str(category).strip().casefold()
+    canonical = _PRODUCT_CATEGORY_LOOKUP.get(normalized)
+    return _PRODUCT_CATEGORY_ALIASES.get(canonical) if canonical else None
 
 
 class _CursorProxy:
@@ -854,19 +886,34 @@ class DatabaseMixin:
         try:
             query = "SELECT * FROM products WHERE status = 'In Stock'"
             params = []
-            
+
             if category:
-                query += " AND category = %s"
-                params.append(category)
-            
+                category_key = str(category).strip().casefold()
+                if category_key == 'hot_deals':
+                    query += (
+                        " AND (COALESCE(discount_percent, 0) > 0"
+                        " OR COALESCE(is_on_sale, 0) <> 0"
+                        " OR COALESCE(is_featured, 0) <> 0)"
+                    )
+                elif category_key != 'new_arrivals':
+                    aliases = _category_aliases(category)
+                    if aliases:
+                        query += " AND LOWER(BTRIM(category)) = ANY(%s)"
+                        params.append(list(aliases))
+                    else:
+                        query += " AND LOWER(BTRIM(category)) = LOWER(BTRIM(%s))"
+                        params.append(category)
+
             allowed_sort = ['created_at', 'price', 'name_am', 'rating_avg', 'sold_count']
             if sort_by not in allowed_sort:
                 sort_by = 'created_at'
-            
+
+            if category and str(category).strip().casefold() == 'new_arrivals':
+                sort_by, order = 'created_at', 'DESC'
             order = 'DESC' if order.upper() == 'DESC' else 'ASC'
             query += f" ORDER BY {sort_by} {order} LIMIT %s OFFSET %s"
             params.extend([limit, offset])
-            
+
             cursor = self.execute(query, tuple(params))
             return [dict(row) for row in cursor.fetchall()]
         except psycopg2.Error:
@@ -923,9 +970,25 @@ class DatabaseMixin:
     def get_product_count(self, category: str = None) -> int:
         """የምርት ብዛት"""
         try:
-            if category:
+            category_key = str(category or '').strip().casefold()
+            if category_key == 'hot_deals':
                 cursor = self.execute(
-                    "SELECT COUNT(*) FROM products WHERE category = %s AND status = 'In Stock'",
+                    "SELECT COUNT(*) FROM products WHERE status = 'In Stock' "
+                    "AND (COALESCE(discount_percent, 0) > 0 "
+                    "OR COALESCE(is_on_sale, 0) <> 0 "
+                    "OR COALESCE(is_featured, 0) <> 0)"
+                )
+            elif category and category_key != 'new_arrivals' and _category_aliases(category):
+                cursor = self.execute(
+                    "SELECT COUNT(*) FROM products "
+                    "WHERE LOWER(BTRIM(category)) = ANY(%s) AND status = 'In Stock'",
+                    (list(_category_aliases(category)),)
+                )
+            elif category and category_key not in ('new_arrivals',):
+                cursor = self.execute(
+                    "SELECT COUNT(*) FROM products "
+                    "WHERE LOWER(BTRIM(category)) = LOWER(BTRIM(%s)) "
+                    "AND status = 'In Stock'",
                     (category,)
                 )
             else:
@@ -938,6 +1001,33 @@ class DatabaseMixin:
         except Exception as e:
             logger.error(f"❌ የምርት ብዛት ማግኘት አልተቻለም: {e}")
             return 0
+
+    def get_product_category_counts(self) -> Dict[str, int]:
+        """Return in-stock counts keyed by canonical storefront category."""
+        cursor = self.execute(
+            "SELECT LOWER(BTRIM(category)) AS category, COUNT(*) AS count "
+            "FROM products WHERE status = 'In Stock' GROUP BY LOWER(BTRIM(category))"
+        )
+        counts = {
+            **{category: 0 for category in _PRODUCT_CATEGORY_ALIASES},
+            'new_arrivals': 0,
+            'hot_deals': 0,
+        }
+        for row in cursor.fetchall():
+            count = int(row['count'])
+            counts['new_arrivals'] += count
+            canonical = _PRODUCT_CATEGORY_LOOKUP.get(str(row['category']).casefold())
+            if canonical:
+                counts[canonical] += count
+
+        deal_count = self.execute(
+            "SELECT COUNT(*) AS count FROM products WHERE status = 'In Stock' "
+            "AND (COALESCE(discount_percent, 0) > 0 "
+            "OR COALESCE(is_on_sale, 0) <> 0 "
+            "OR COALESCE(is_featured, 0) <> 0)"
+        ).fetchone()
+        counts['hot_deals'] = int(deal_count['count'])
+        return counts
     
     def get_low_stock_products(self, threshold: int = 5) -> List[Dict]:
         """ዝቅተኛ ክምችት ያላቸው ምርቶች"""

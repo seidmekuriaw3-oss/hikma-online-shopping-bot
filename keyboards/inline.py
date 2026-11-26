@@ -5,37 +5,100 @@ Hikma Online Shopping Bot - Inline ኪቦርዶች
 ይህ ፋይል ሁሉንም የ Inline ኪቦርድ መፍጠሪያ ተግባራትን ይይዛል
 """
 
-from typing import Optional, List
+from typing import Dict, List, Optional
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import config
 from utils.helpers import get_text, format_payment_method
 
 
+_PRODUCT_CATEGORY_LABELS = {
+    'women': ("👗 የሴቶች ፋሽን", "👗 Women's Fashion"),
+    'men': ("👕 የወንዶች ፋሽን", "👕 Men's Fashion"),
+    'kids': ("👶 የልጆች አልባሳት", "👶 Kids & Baby"),
+    'pajamas': ("🛌 ፒጃማ እና የቤት ልብስ", "🛌 Pajamas & Loungewear"),
+    'shoes': ("👟 ጫማዎች", "👟 Shoes & Footwear"),
+    'accessories': ("👜 ቦርሳ እና መዋቢያ", "👜 Bags & Accessories"),
+}
+
+_STOREFRONT_CATEGORY_LABELS = {
+    **_PRODUCT_CATEGORY_LABELS,
+    'new_arrivals': ("✨ አዲስ የገቡ", "✨ New Arrivals"),
+    'hot_deals': ("🔥 ቅናሽ ያላቸው", "🔥 Hot Deals"),
+}
+
+
 def get_main_keyboard(lang: str = 'am') -> InlineKeyboardMarkup:
-    """ዋና Inline ኪቦርድ መፍጠር"""
+    """Build the welcome keyboard around the storefront category menu."""
     markup = InlineKeyboardMarkup(row_width=2)
-    
+
     markup.add(
-        InlineKeyboardButton("👕 " + get_text(lang, 'men'), callback_data="category_Men"),
-        InlineKeyboardButton("👗 " + get_text(lang, 'women'), callback_data="category_Women")
+        InlineKeyboardButton(
+            "🛍️ ምርቶች" if lang == 'am' else "🛍️ Products",
+            callback_data="browse_categories",
+        ),
+        InlineKeyboardButton(
+            "🛒 ጋሪ" if lang == 'am' else "🛒 Cart",
+            callback_data="view_cart",
+        ),
     )
-    
     markup.add(
-        InlineKeyboardButton("🛒 " + get_text(lang, 'cart'), callback_data="view_cart"),
-        InlineKeyboardButton("📋 " + get_text(lang, 'orders'), callback_data="view_orders")
+        InlineKeyboardButton(
+            "📋 ትዕዛዞቼ" if lang == 'am' else "📋 My Orders",
+            callback_data="view_orders",
+        ),
+        InlineKeyboardButton(
+            "❤️ ተወዳጆች" if lang == 'am' else "❤️ Wishlist",
+            callback_data="show_wishlist",
+        ),
     )
-    
     markup.add(
-        InlineKeyboardButton("❤️ " + get_text(lang, 'wishlist'), callback_data="show_wishlist"),
-        InlineKeyboardButton("🏷️ " + get_text(lang, 'discounts'), callback_data="show_discounts")
+        InlineKeyboardButton(
+            "👤 መገለጫ" if lang == 'am' else "👤 Profile",
+            callback_data="view_profile",
+        ),
+        InlineKeyboardButton(
+            "📍 አድራሻ እና ስልክ" if lang == 'am' else "📍 Contact",
+            callback_data="view_contact",
+        ),
     )
-    
-    markup.add(
-        InlineKeyboardButton("👤 " + get_text(lang, 'profile'), callback_data="view_profile"),
-        InlineKeyboardButton("📍 " + get_text(lang, 'contact'), callback_data="view_contact")
-    )
-    
+    return markup
+
+
+def get_storefront_categories_keyboard(
+    counts: Optional[Dict[str, int]] = None,
+    lang: str = 'am',
+) -> InlineKeyboardMarkup:
+    """Build the two-column category picker, including counts when supplied."""
+    counts = counts or {}
+    markup = InlineKeyboardMarkup(row_width=2)
+    buttons = []
+    for key, labels in _STOREFRONT_CATEGORY_LABELS.items():
+        label = labels[0 if lang == 'am' else 1]
+        if key in counts:
+            label = f"{label} ({counts[key]})"
+        buttons.append(InlineKeyboardButton(
+            label,
+            callback_data=f"browse_cat:{key}:0",
+        ))
+    markup.add(*buttons)
+    markup.add(InlineKeyboardButton(
+        "🔙 ዋና ሜኑ" if lang == 'am' else "🔙 Main Menu",
+        callback_data="main_menu",
+    ))
+    return markup
+
+
+def get_admin_product_category_keyboard(lang: str = 'am') -> InlineKeyboardMarkup:
+    """Build the category picker used while creating a product."""
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(*[
+        InlineKeyboardButton(
+            labels[0 if lang == 'am' else 1],
+            callback_data=f"add_product_category:{key}",
+        )
+        for key, labels in _PRODUCT_CATEGORY_LABELS.items()
+    ])
     return markup
 
 
@@ -161,8 +224,8 @@ def get_browse_product_keyboard(
         )
     action_row.append(
         InlineKeyboardButton(
-            "🔙 ዋና ሜኑ" if lang == 'am' else "🔙 Main Menu",
-            callback_data="main_menu",
+            "🔙 ወደ ካታጎሪዎች" if lang == 'am' else "🔙 Back to Categories",
+            callback_data="browse_categories",
         )
     )
     markup.row(*action_row)

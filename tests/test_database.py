@@ -10,6 +10,7 @@ class FakeCursor:
         self.rowcount = 0
         self.closed = False
         self.params = None
+        self.rows = []
 
     def execute(self, query, params=()):
         self.pool.statements.append(str(query))
@@ -18,6 +19,8 @@ class FakeCursor:
         if str(query).lstrip().upper().startswith('SELECT'):
             self.description = (object(),)
             self.rowcount = 1
+            result_sets = getattr(self.pool, 'result_sets', [])
+            self.rows = result_sets.pop(0) if result_sets else self.pool.rows
 
     def executemany(self, query, params):
         self.pool.statements.append(str(query))
@@ -28,7 +31,7 @@ class FakeCursor:
         return None
 
     def fetchall(self):
-        return self.pool.rows
+        return self.rows
 
     def close(self):
         self.closed = True
@@ -60,6 +63,7 @@ class FakePool:
         self.statements = []
         self.last_params = None
         self.rows = [{'id': 42}]
+        self.result_sets = []
         self.fetchone_rows = []
         self.connection = FakeConnection(self)
         self.returned = []
@@ -166,3 +170,62 @@ def test_admin_order_query_all_statuses_includes_customer_and_items():
     assert 'jsonb_agg' in sql
     assert 'order_status' not in sql
     assert db._pool.last_params == (50,)
+
+
+@pytest.mark.parametrize(
+    ('requested_category', 'legacy_value'),
+    [
+        ('women', 'women'),
+        ('Women', 'የሴት ልብሶች'),
+        ('men', 'men'),
+        ('Men', 'የወንድ ልብሶች'),
+    ],
+)
+def test_product_queries_match_canonical_and_legacy_category_values(
+    requested_category,
+    legacy_value,
+):
+    db = make_database()
+
+    db.get_products(category=requested_category)
+
+    query = '\n'.join(db._pool.statements).lower()
+    aliases, limit, offset = db._pool.last_params
+    assert 'lower(btrim(category)) = any(%s)' in query
+    assert legacy_value.casefold() in aliases
+    assert (limit, offset) == (20, 0)
+
+
+def test_new_arrivals_and_hot_deals_use_expected_product_fields():
+    db = make_database()
+
+    db.get_products(category='new_arrivals')
+    newest_query = db._pool.statements[-1].lower()
+    assert "where status = 'in stock'" in newest_query
+    assert 'order by created_at desc' in newest_query
+    assert db._pool.last_params == (20, 0)
+
+    db.get_products(category='hot_deals')
+    deals_query = db._pool.statements[-1].lower()
+    assert 'discount_percent' in deals_query
+    assert 'is_on_sale' in deals_query
+    assert 'is_featured' in deals_query
+
+
+def test_product_category_counts_roll_up_legacy_values_and_special_categories():
+    db = make_database()
+    db._pool.result_sets = [
+        [
+            {'category': 'Women', 'count': 2},
+            {'category': 'የወንድ ልብሶች', 'count': 3},
+            {'category': 'Custom', 'count': 4},
+        ],
+        [{'count': 1}],
+    ]
+
+    counts = db.get_product_category_counts()
+
+    assert counts['women'] == 2
+    assert counts['men'] == 3
+    assert counts['new_arrivals'] == 9
+    assert counts['hot_deals'] == 1

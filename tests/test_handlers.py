@@ -4,11 +4,15 @@ import psycopg2
 
 from config import config
 from handlers import (
-    _DatabaseErrorReportingBot, admin, orders, products, register_handlers, start, user,
+    _DatabaseErrorReportingBot, admin, messages, orders, products,
+    register_handlers, start, user,
 )
 from keyboards.inline import (
-    get_admin_keyboard, get_payment_keyboard, get_product_keyboard, get_social_keyboard,
+    get_admin_keyboard, get_admin_product_category_keyboard,
+    get_main_keyboard, get_payment_keyboard, get_product_keyboard, get_social_keyboard,
+    get_storefront_categories_keyboard,
 )
+from keyboards.reply import get_main_menu
 
 
 class RecordingBot:
@@ -20,6 +24,7 @@ class RecordingBot:
         self.message_options = []
         self.callback_answers = []
         self.next_steps = []
+        self.cleared_step_chats = []
         self.photos = []
         self.edits = []
         self._next_message_id = 1
@@ -71,6 +76,9 @@ class RecordingBot:
 
     def register_next_step_handler(self, message, handler, *args, **kwargs):
         self.next_steps.append((message, handler, args, kwargs))
+
+    def clear_step_handler_by_chat_id(self, chat_id):
+        self.cleared_step_chats.append(chat_id)
 
     def reply_to(self, message, text, **kwargs):
         self.replies.append(text)
@@ -219,6 +227,89 @@ def test_add_product_callback_tracks_fresh_admin_through_all_steps(monkeypatch):
     assert user_id not in admin.admin_states
 
 
+def test_admin_add_product_category_can_be_selected_inline_end_to_end(monkeypatch):
+    user_id = 42
+    monkeypatch.setattr(config.bot, 'ADMIN_IDS', [user_id])
+    monkeypatch.setattr(admin, 'admin_states', {})
+    monkeypatch.setattr(admin, 'admin_uploading', set())
+    monkeypatch.setattr(admin, 'notify_admins', lambda *args, **kwargs: None)
+    created_products = []
+    db = SimpleNamespace(
+        get_user=lambda _user_id: {'lang': 'en'},
+        create_product=lambda product: created_products.append(product) or 77,
+        log_activity=lambda *args: None,
+        get_user_count=lambda: 0,
+        get_product_count=lambda: 1,
+        get_order_stats=lambda: {'summary': {}},
+        get_daily_stats=lambda: {},
+    )
+    bot = RecordingBot()
+    admin.register(bot, db)
+
+    add_handler = next(
+        handler for filters, handler in bot.message_handlers
+        if filters.get('commands') == ['add']
+    )
+    add_handler(SimpleNamespace(
+        text='/add',
+        from_user=SimpleNamespace(id=user_id),
+        chat=SimpleNamespace(id=user_id),
+    ))
+
+    for index, (text, content_type) in enumerate((
+        ('Dress', 'text'),
+        ('Dress EN', 'text'),
+        ('25', 'text'),
+        ('M', 'text'),
+    )):
+        _, handler, args, kwargs = bot.next_steps[index]
+        handler(SimpleNamespace(
+            chat=SimpleNamespace(id=user_id),
+            from_user=SimpleNamespace(id=user_id),
+            text=text,
+            content_type=content_type,
+        ), *args, **kwargs)
+
+    category_keyboard = bot.message_options[-1]['reply_markup']
+    category_buttons = [
+        button
+        for row in category_keyboard.keyboard
+        for button in row
+    ]
+    assert len(category_buttons) == 6
+    assert any(button.callback_data == 'add_product_category:women' for button in category_buttons)
+
+    select_category = next(
+        handler for filters, handler in bot.callback_handlers
+        if filters['func'](SimpleNamespace(data='add_product_category:women'))
+    )
+    select_category(SimpleNamespace(
+        id='select-women',
+        data='add_product_category:women',
+        from_user=SimpleNamespace(id=user_id),
+        message=SimpleNamespace(chat=SimpleNamespace(id=user_id)),
+    ))
+    assert bot.cleared_step_chats == [user_id]
+    assert admin.admin_states[user_id]['data']['category'] == 'women'
+
+    _, stock_handler, args, kwargs = bot.next_steps[-1]
+    stock_handler(SimpleNamespace(
+        chat=SimpleNamespace(id=user_id),
+        from_user=SimpleNamespace(id=user_id),
+        text='3',
+    ), *args, **kwargs)
+    _, image_handler, args, kwargs = bot.next_steps[-1]
+    image_handler(SimpleNamespace(
+        chat=SimpleNamespace(id=user_id),
+        from_user=SimpleNamespace(id=user_id),
+        content_type='photo',
+        photo=[SimpleNamespace(file_id='dress-photo')],
+    ), *args, **kwargs)
+
+    assert created_products[0]['category'] == 'women'
+    assert created_products[0]['stock_quantity'] == 3
+
+
 def test_product_navigation_handler_does_not_consume_wishlist_callbacks():
     bot = RecordingBot()
     products.register(bot, SimpleNamespace())
@@ -230,6 +321,179 @@ def test_product_navigation_handler_does_not_consume_wishlist_callbacks():
 
     assert navigation_filter(SimpleNamespace(data='product_nav_Men_1'))
     assert not navigation_filter(SimpleNamespace(data='product_wishlist_7'))
+
+
+def test_main_menu_has_six_customer_actions_and_admin_only_button(monkeypatch):
+    monkeypatch.setattr(config.bot, 'ADMIN_IDS', [42])
+    db = SimpleNamespace(get_user=lambda _user_id: {'lang': 'en'})
+
+    customer_menu = get_main_menu(7, db)
+    admin_menu = get_main_menu(42, db)
+    customer_rows = [[button['text'] for button in row] for row in customer_menu.keyboard]
+    admin_rows = [[button['text'] for button in row] for row in admin_menu.keyboard]
+
+    assert customer_rows == [
+        ['🛍️ Products', '🛒 Cart'],
+        ['📋 My Orders', '❤️ Wishlist'],
+        ['👤 Profile', '📍 Contact'],
+    ]
+    assert admin_rows == customer_rows + [['⚙️ Admin Panel']]
+
+
+def test_storefront_menu_opens_eight_category_carousel_with_legacy_aliases(monkeypatch):
+    monkeypatch.setattr(admin, 'admin_states', {})
+    catalog = [{
+        'id': 5, 'name_am': 'ቀሚስ', 'name_en': 'Dress', 'price': 120,
+        'size': 'M', 'stock_quantity': 2, 'image_id': 'photo-1',
+        'category': 'Women',
+    }]
+    db = SimpleNamespace(
+        get_user=lambda _user_id: {'lang': 'en'},
+        get_product_category_counts=lambda: {
+            'women': 1, 'men': 2, 'kids': 0, 'pajamas': 0,
+            'shoes': 0, 'accessories': 0, 'new_arrivals': 3, 'hot_deals': 1,
+        },
+        get_products=lambda category=None, **_kwargs: catalog if category == 'women' else [],
+        log_activity=lambda *_args: None,
+    )
+    bot = RecordingBot()
+    register_handlers(bot, db)
+    products_button_handler = next(
+        handler for filters, handler in bot.message_handlers
+        if filters.get('func')
+        and filters['func'](SimpleNamespace(text='🛍️ Products'))
+    )
+    products_button_handler(SimpleNamespace(
+        text='🛍️ Products',
+        from_user=SimpleNamespace(id=701),
+        chat=SimpleNamespace(id=701),
+    ))
+
+    assert 'reply_markup' in bot.message_options[-1], (
+        products_button_handler.__name__, bot.messages,
+    )
+    keyboard = bot.message_options[-1]['reply_markup']
+    category_buttons = [
+        button
+        for row in keyboard.keyboard
+        for button in row
+        if button.callback_data and button.callback_data.startswith('browse_cat:')
+    ]
+    assert len(category_buttons) == 8
+    assert any(button.text == "👗 Women's Fashion (1)" for button in category_buttons)
+    assert any(button.callback_data == 'browse_cat:new_arrivals:0' for button in category_buttons)
+    assert any(button.callback_data == 'browse_cat:hot_deals:0' for button in category_buttons)
+
+    category_handler = next(
+        handler for filters, handler in bot.callback_handlers
+        if filters['func'](SimpleNamespace(data='browse_cat:women:0'))
+    )
+    category_handler(SimpleNamespace(
+        id='browse-women',
+        data='browse_cat:women:0',
+        from_user=SimpleNamespace(id=701),
+        message=SimpleNamespace(
+            chat=SimpleNamespace(id=701),
+            message_id=15,
+            content_type='text',
+            text='🛍️ Welcome to the Hikma store!\n\nChoose a category:',
+        ),
+    ))
+
+    assert bot.photos[-1][1] == 'photo-1'
+    assert 'Dress' in bot.photos[-1][2]['caption']
+    product_keyboard = bot.photos[-1][2]['reply_markup']
+    buttons = [
+        button for row in product_keyboard.keyboard for button in row
+    ]
+    assert any(button.text == '🔙 Back to Categories' for button in buttons)
+    assert any(button.callback_data == 'browse_categories' for button in buttons)
+
+    categories_handler = next(
+        handler for filters, handler in bot.callback_handlers
+        if filters['func'](SimpleNamespace(data='browse_categories'))
+    )
+    categories_handler(SimpleNamespace(
+        id='back-categories',
+        data='browse_categories',
+        from_user=SimpleNamespace(id=42),
+        message=SimpleNamespace(
+            chat=SimpleNamespace(id=42),
+            message_id=88,
+            content_type='photo',
+        ),
+    ))
+    assert bot.edits[-1][0] == 'caption'
+    assert any(
+        button.callback_data == 'browse_cat:women:0'
+        for row in bot.edits[-1][4]['reply_markup'].keyboard
+        for button in row
+    )
+
+
+def test_storefront_category_keyboard_keeps_two_column_grid():
+    keyboard = get_storefront_categories_keyboard(lang='am')
+    category_rows = keyboard.keyboard[:4]
+
+    assert all(len(row) == 2 for row in category_rows)
+    assert [
+        button.callback_data
+        for row in category_rows
+        for button in row
+    ] == [
+        'browse_cat:women:0', 'browse_cat:men:0',
+        'browse_cat:kids:0', 'browse_cat:pajamas:0',
+        'browse_cat:shoes:0', 'browse_cat:accessories:0',
+        'browse_cat:new_arrivals:0', 'browse_cat:hot_deals:0',
+    ]
+
+
+def test_welcome_inline_products_button_opens_category_picker():
+    keyboard = get_main_keyboard('en')
+    products_button = next(
+        button
+        for row in keyboard.keyboard
+        for button in row
+        if button.callback_data == 'browse_categories'
+    )
+    assert products_button.text == '🛍️ Products'
+
+
+def test_message_module_routes_new_products_and_wishlist_buttons():
+    db = SimpleNamespace(
+        get_user=lambda _user_id: {'lang': 'en'},
+        log_activity=lambda *_args: None,
+        get_product_category_counts=lambda: {},
+        execute=lambda *_args: SimpleNamespace(fetchall=lambda: []),
+    )
+    bot = RecordingBot()
+    messages.register(bot, db)
+    catchall = next(
+        handler for filters, handler in bot.message_handlers
+        if filters.get('func')
+        and filters['func'](SimpleNamespace(text='🛍️ Products'))
+    )
+    message = SimpleNamespace(
+        text='🛍️ Products',
+        from_user=SimpleNamespace(id=42),
+        chat=SimpleNamespace(id=42),
+    )
+    catchall(message)
+    assert 'Choose a category' in bot.messages[-1][1]
+    assert any(
+        button.callback_data == 'browse_cat:women:0'
+        for row in bot.message_options[-1]['reply_markup'].keyboard
+        for button in row
+    )
+
+    message.text = '❤️ Wishlist'
+    catchall(message)
+    assert 'Your wishlist is empty' in bot.messages[-1][1]
+    assert any(
+        button.callback_data == 'browse_categories'
+        for row in bot.message_options[-1]['reply_markup'].keyboard
+        for button in row
+    )
 
 
 def test_category_selection_sends_first_product_photo_card():
@@ -328,6 +592,38 @@ def test_browse_category_next_and_back_edit_the_product_card_in_place():
             for button in row
         ]
         assert f'browse_cat:Men:{1 - index}' in callback_data
+
+
+def test_empty_hot_deals_returns_to_category_menu_gracefully():
+    db = SimpleNamespace(
+        get_user=lambda _user_id: {'lang': 'en'},
+        get_product_category_counts=lambda: {'hot_deals': 0},
+        get_products=lambda **_kwargs: [],
+    )
+    bot = RecordingBot()
+    products.register(bot, db)
+    handler = next(
+        handler for filters, handler in bot.callback_handlers
+        if filters['func'](SimpleNamespace(data='browse_cat:hot_deals:0'))
+    )
+    handler(SimpleNamespace(
+        id='empty-deals',
+        data='browse_cat:hot_deals:0',
+        from_user=SimpleNamespace(id=42),
+        message=SimpleNamespace(
+            chat=SimpleNamespace(id=42),
+            message_id=93,
+            content_type='photo',
+        ),
+    ))
+
+    assert bot.edits[-1][0] == 'caption'
+    assert bot.callback_answers[-1][1] == 'No active deals right now. Choose another category.'
+    assert any(
+        button.callback_data == 'browse_cat:women:0'
+        for row in bot.edits[-1][4]['reply_markup'].keyboard
+        for button in row
+    )
 
 
 def test_product_command_supports_spaced_and_compact_ids():
@@ -598,12 +894,13 @@ def test_customer_callback_prefixes_have_single_feature_owner():
     bot = RecordingBot()
     register_handlers(bot, SimpleNamespace())
     callback_data = (
-        'category_Men', 'browse_cat:Men:1', 'product_cart_1',
+        'category_Men', 'browse_categories', 'browse_cat:Men:1', 'product_cart_1',
         'product_wishlist_1', 'cart_inc_1', 'view_cart', 'checkout',
         'checkout_phone_confirm', 'checkout_address_confirm', 'view_orders',
         'order_1', 'view_profile', 'change_language', 'show_wishlist',
         'view_contact', 'main_menu', 'pay_cash', 'admin_add_product',
         'admin_order_view_1', 'admin_find_user', 'admin_toggle_ban_42',
+        'add_product_category:women',
         'admin_all_orders', 'admin_pending_orders', 'admin_products',
         'admin_orders', 'admin_users', 'admin_reports', 'admin_discounts',
         'admin_settings',

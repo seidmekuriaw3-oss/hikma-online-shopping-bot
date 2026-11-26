@@ -163,9 +163,17 @@ def register(bot: TeleBot, db: Database):
         db.log_activity(user_id, 'message', f'ተጠቃሚ: {text[:50]}')
 
         # የአስተዳዳሪ ሜኑ
-        if text in ['⚙️ አስተዳደር', '⚙️ Admin', 'አስተዳደር ⚙️', 'Admin ⚙️']:
+        if text in [
+            '⚙️ አስተዳደር', '⚙️ Admin', 'አስተዳደር ⚙️', 'Admin ⚙️',
+            '⚙️ አስተዳዳሪ', '⚙️ Admin Panel',
+        ]:
             from handlers.admin import show_admin_panel
             show_admin_panel(message, db, bot)
+            return
+
+        if text in ['🛍️ ምርቶች', '🛍️ Products']:
+            from handlers.products import show_category_menu
+            show_category_menu(message, db, bot)
             return
         
         # የምርት ምድቦች
@@ -191,11 +199,17 @@ def register(bot: TeleBot, db: Database):
         if text in ['👤 መገለጫ', '👤 Profile', 'መገለጫ 👤', 'Profile 👤']:
             show_user_profile(message, db, bot)
             return
+
+        if text in ['❤️ ተወዳጆች', '❤️ Wishlist', 'My Wishlist']:
+            from handlers.callback import show_wishlist
+            show_wishlist(message.chat.id, user_id, db, bot)
+            return
         
         # አድራሻ
         if text in [
             '📍 አድራሻ', '📍 Address', 'አድራሻ እና ስልክ 📍',
             'Address & Phone 📍', '📍 አድራሻ እና ስልክ', '📍 Address & Phone',
+            '📍 Contact',
         ]:
             show_contact_info(message, db, bot)
             return
