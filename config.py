@@ -8,6 +8,7 @@ Hikma Online Shopping Bot - ውቅር ፋይል
 import os
 import json
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 from dotenv import load_dotenv
@@ -77,6 +78,9 @@ class DatabaseConfig:
     DB_URL: str = os.getenv('DATABASE_URL', '')
     DB_POOL_SIZE: int = int(os.getenv('DB_POOL_SIZE', 10))
     DB_TIMEOUT: int = int(os.getenv('DB_TIMEOUT', 30))
+    POSTGRES_DB: Optional[str] = os.getenv('POSTGRES_DB')
+    POSTGRES_USER: Optional[str] = os.getenv('POSTGRES_USER')
+    POSTGRES_PASSWORD: Optional[str] = os.getenv('POSTGRES_PASSWORD')
     
     # ምትኬ
     BACKUP_DIR: str = os.getenv('BACKUP_DIR', 'assets/documents/backups')
@@ -85,8 +89,31 @@ class DatabaseConfig:
     
     def validate(self) -> bool:
         """የPostgreSQL ግንኙነት መኖሩን ማረጋገጥ"""
-        if not self.DB_URL.startswith(('postgresql://', 'postgres://')):
+        parsed_url = urlsplit(self.DB_URL)
+        if parsed_url.scheme not in ('postgresql', 'postgres') or not parsed_url.hostname or not parsed_url.path.strip('/'):
             raise ValueError('❌ DATABASE_URL የPostgreSQL URL መሆን አለበት!')
+
+        if self.DB_POOL_SIZE < 1:
+            raise ValueError('❌ DB_POOL_SIZE ከዜሮ በላይ መሆን አለበት!')
+        if self.DB_TIMEOUT < 1:
+            raise ValueError('❌ DB_TIMEOUT ከዜሮ በላይ መሆን አለበት!')
+
+        postgres_settings = (
+            self.POSTGRES_DB,
+            self.POSTGRES_USER,
+            self.POSTGRES_PASSWORD,
+        )
+        if os.getenv('ENVIRONMENT', '').lower() != 'test' and any(
+            value is not None for value in postgres_settings
+        ):
+            if not all(postgres_settings):
+                raise ValueError('❌ POSTGRES_DB, POSTGRES_USER እና POSTGRES_PASSWORD ሁሉም መዘጋጀት አለባቸው!')
+            if (
+                unquote(parsed_url.path.lstrip('/')) != self.POSTGRES_DB
+                or unquote(parsed_url.username or '') != self.POSTGRES_USER
+                or unquote(parsed_url.password or '') != self.POSTGRES_PASSWORD
+            ):
+                raise ValueError('❌ DATABASE_URL ከPostgreSQL database credentials ጋር መመሳሰል አለበት!')
         return True
 
 

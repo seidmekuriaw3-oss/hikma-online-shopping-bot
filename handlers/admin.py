@@ -16,8 +16,12 @@ from telebot.types import ReplyKeyboardMarkup, KeyboardButton
 
 from database import Database
 from config import config
-from utils.helpers import get_text, get_user_lang, format_number, format_currency, is_admin
-from keyboards.inline import get_admin_keyboard, get_confirm_keyboard
+from utils.helpers import (
+    get_text, get_user_lang, format_number, format_currency, format_payment_method, is_admin,
+)
+from keyboards.inline import (
+    get_admin_keyboard, get_confirm_keyboard, get_admin_order_actions_keyboard,
+)
 from services.notifications import notify_admins, send_broadcast
 
 logger = logging.getLogger(__name__)
@@ -25,6 +29,35 @@ logger = logging.getLogger(__name__)
 # ለአስተዳዳሪ ሂደቶች ጊዜያዊ መረጃ
 admin_states = {}
 admin_uploading = set()
+
+
+def _ensure_add_product_state(user_id: int) -> Dict:
+    """Return a complete add-product state, recovering cleanly if it is missing."""
+    state = admin_states.setdefault(user_id, {})
+    if state.get('action') != 'add_product':
+        state.clear()
+        state.update(action='add_product', step=1, data={})
+    state.setdefault('step', 1)
+    if not isinstance(state.get('data'), dict):
+        state['data'] = {}
+    return state
+
+
+def _get_admin_chat_id(update) -> Optional[int]:
+    message = getattr(update, 'message', None) or update
+    chat_id = getattr(getattr(message, 'chat', None), 'id', None)
+    if chat_id is None:
+        chat_id = getattr(getattr(update, 'from_user', None), 'id', None)
+    return chat_id
+
+
+def _send_admin_message(bot: TeleBot, update, text: str, **kwargs):
+    """Send to the chat without relying on the source message still existing."""
+    chat_id = _get_admin_chat_id(update)
+    if chat_id is None:
+        logger.warning("Cannot send admin response: update has no chat or user ID")
+        return None
+    return bot.send_message(chat_id, text, **kwargs)
 
 
 def route_admin_product_step(message: Message, db: Database, bot: TeleBot):
@@ -51,13 +84,19 @@ def route_admin_product_step(message: Message, db: Database, bot: TeleBot):
     return False
 
 
-def start_add_product(message: Message, db: Database, bot: TeleBot):
+def start_add_product(
+    message: Message,
+    db: Database,
+    bot: TeleBot,
+    user_id: Optional[int] = None,
+):
     """አዲስ ምርት መጨመር ሂደት መጀመር"""
-    user_id = message.from_user.id
-    admin_states[user_id] = {'action': 'add_product', 'step': 1, 'data': {}}
+    user_id = user_id if user_id is not None else message.from_user.id
+    state = _ensure_add_product_state(user_id)
+    state.update(step=1, data={})
 
     prompt = bot.send_message(
-        message.chat.id,
+        _get_admin_chat_id(message),
         "📝 *አዲስ ምርት መጨመር*\n\n"
         "የምርቱን ስም በአማርኛ ያስገቡ:",
         parse_mode='Markdown'
@@ -68,8 +107,9 @@ def start_add_product(message: Message, db: Database, bot: TeleBot):
 def process_add_product_name(message: Message, db: Database, bot: TeleBot):
     """የምርት ስም በአማርኛ ማስኬድ"""
     user_id = message.from_user.id
-    admin_states[user_id]['data']['name_am'] = message.text
-    admin_states[user_id]['step'] = 2
+    state = _ensure_add_product_state(user_id)
+    state['data']['name_am'] = message.text
+    state['step'] = 2
 
     bot.send_message(
         message.chat.id,
@@ -81,8 +121,9 @@ def process_add_product_name(message: Message, db: Database, bot: TeleBot):
 def process_add_product_name_en(message: Message, db: Database, bot: TeleBot):
     """የምርት ስም በእንግሊዝኛ ማስኬድ"""
     user_id = message.from_user.id
-    admin_states[user_id]['data']['name_en'] = message.text
-    admin_states[user_id]['step'] = 3
+    state = _ensure_add_product_state(user_id)
+    state['data']['name_en'] = message.text
+    state['step'] = 3
 
     bot.send_message(
         message.chat.id,
@@ -97,8 +138,9 @@ def process_add_product_price(message: Message, db: Database, bot: TeleBot):
 
     try:
         price = float(message.text)
-        admin_states[user_id]['data']['price'] = price
-        admin_states[user_id]['step'] = 4
+        state = _ensure_add_product_state(user_id)
+        state['data']['price'] = price
+        state['step'] = 4
 
         bot.send_message(
             message.chat.id,
@@ -116,8 +158,9 @@ def process_add_product_price(message: Message, db: Database, bot: TeleBot):
 def process_add_product_size(message: Message, db: Database, bot: TeleBot):
     """የምርት መጠን ማስኬድ"""
     user_id = message.from_user.id
-    admin_states[user_id]['data']['size'] = message.text.upper()
-    admin_states[user_id]['step'] = 5
+    state = _ensure_add_product_state(user_id)
+    state['data']['size'] = message.text.upper()
+    state['step'] = 5
 
     markup = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True, row_width=2)
     markup.add("Men", "Women", "Accessories")
@@ -142,8 +185,9 @@ def process_add_product_category(message: Message, db: Database, bot: TeleBot):
         bot.register_next_step_handler(message, process_add_product_category, db, bot)
         return
 
-    admin_states[user_id]['data']['category'] = message.text
-    admin_states[user_id]['step'] = 6
+    state = _ensure_add_product_state(user_id)
+    state['data']['category'] = message.text
+    state['step'] = 6
 
     bot.send_message(
         message.chat.id,
@@ -159,8 +203,9 @@ def process_add_product_stock(message: Message, db: Database, bot: TeleBot):
 
     try:
         stock = int(message.text)
-        admin_states[user_id]['data']['stock_quantity'] = stock
-        admin_states[user_id]['step'] = 7
+        state = _ensure_add_product_state(user_id)
+        state['data']['stock_quantity'] = stock
+        state['step'] = 7
 
         bot.send_message(
             message.chat.id,
@@ -190,7 +235,17 @@ def process_add_product_image(message: Message, db: Database, bot: TeleBot):
 
     admin_uploading.discard(user_id)
     image_id = message.photo[-1].file_id
-    data = admin_states[user_id]['data']
+    state = _ensure_add_product_state(user_id)
+    data = state['data']
+    required_fields = ('name_am', 'name_en', 'price', 'size', 'category', 'stock_quantity')
+    if any(field not in data for field in required_fields):
+        _send_admin_message(
+            bot,
+            message,
+            "❌ የምርት መጨመር ሂደቱ ጊዜው አልፏል። እባክዎ /add እንደገና ይጀምሩ።",
+        )
+        admin_states.pop(user_id, None)
+        return
 
     product_data = {
         'name_am': data['name_am'],
@@ -232,7 +287,7 @@ def process_add_product_image(message: Message, db: Database, bot: TeleBot):
         )
 
     admin_states.pop(user_id, None)
-    show_admin_panel(message)
+    _send_admin_message(bot, message, "⚙️ የአስተዳዳሪ ፓነል")
 
 
 def is_admin_uploading(user_id: int) -> bool:
@@ -249,7 +304,7 @@ def handle_admin_photo(message: Message, db: Database, bot: TeleBot):
     admin_uploading.discard(user_id)
     state = admin_states.get(user_id)
     if not state or state.get('action') != 'add_product':
-        bot.reply_to(message, "📸 ፎቶዎ ተቀብሏል።")
+        _send_admin_message(bot, message, "📸 ፎቶዎ ተቀብሏል።")
         return True
 
     try:
@@ -306,30 +361,30 @@ def register(bot: TeleBot, db: Database):
     @bot.message_handler(commands=['add'])
     def add_product_command(message: Message):
         if not is_admin(message.from_user.id, config.bot.ADMIN_IDS):
-            bot.reply_to(message, "⛔ ይህን ለማድረግ ፈቃድ የለዎትም!")
+            _send_admin_message(bot, message, "⛔ ይህን ለማድረግ ፈቃድ የለዎትም!")
             return
         start_add_product(message, db, bot)
 
     @bot.message_handler(commands=['delete'])
     def delete_product_command(message: Message):
         if not is_admin(message.from_user.id, config.bot.ADMIN_IDS):
-            bot.reply_to(message, "⛔ ይህን ለማድረግ ፈቃድ የለዎትም!")
+            _send_admin_message(bot, message, "⛔ ይህን ለማድረግ ፈቃድ የለዎትም!")
             return
         parts = (message.text or '').split(maxsplit=1)
         if len(parts) != 2:
-            bot.reply_to(message, "Usage: /delete <id>")
+            _send_admin_message(bot, message, "Usage: /delete <id>")
             return
         process_delete_product(message, db, bot, parts[1])
     
     # ==================== የአስተዳዳሪ ፓነል ====================
     
     @bot.message_handler(func=lambda m: m.text in ['⚙️ አስተዳደር', '⚙️ Admin', 'አስተዳደር ⚙️', 'Admin ⚙️'])
-    def show_admin_panel(message: Message):
+    def show_admin_panel(message: Message, user_id: Optional[int] = None):
         """የአስተዳዳሪ ፓነል ማሳየት"""
-        user_id = message.from_user.id
+        user_id = user_id if user_id is not None else message.from_user.id
         
         if not is_admin(user_id, config.bot.ADMIN_IDS):
-            bot.reply_to(message, "⛔ ይህን ለማድረግ ፈቃድ የለዎትም!")
+            _send_admin_message(bot, message, "⛔ ይህን ለማድረግ ፈቃድ የለዎትም!")
             return
         
         lang = get_user_lang(db, user_id)
@@ -338,7 +393,7 @@ def register(bot: TeleBot, db: Database):
         stats = get_admin_stats(db)
 
         # አስተዳዳሪ የሚገባ ግብዓት በድርድር ሁኔታ እንዳይተኛ ይቆጣጠራል
-        if user_id in admin_states and admin_states[user_id].get('action') == 'add_product':
+        if admin_states.get(user_id, {}).get('action') == 'add_product':
             route_admin_product_step(message, db, bot)
             return
 
@@ -363,9 +418,9 @@ def register(bot: TeleBot, db: Database):
     # ==================== የምርት አስተዳደር ====================
     
     @bot.message_handler(func=lambda m: m.text in ['📦 ምርቶች', '📦 Products'])
-    def manage_products(message: Message):
+    def manage_products(message: Message, user_id: Optional[int] = None):
         """የምርት አስተዳደር ሜኑ"""
-        user_id = message.from_user.id
+        user_id = user_id if user_id is not None else message.from_user.id
         
         if not is_admin(user_id, config.bot.ADMIN_IDS):
             return
@@ -392,9 +447,9 @@ def register(bot: TeleBot, db: Database):
     # ==================== የትዕዛዝ አስተዳደር ====================
     
     @bot.message_handler(func=lambda m: m.text in ['📋 ትዕዛዞች', '📋 Orders'])
-    def manage_orders(message: Message):
+    def manage_orders(message: Message, user_id: Optional[int] = None):
         """የትዕዛዝ አስተዳደር ሜኑ"""
-        user_id = message.from_user.id
+        user_id = user_id if user_id is not None else message.from_user.id
         
         if not is_admin(user_id, config.bot.ADMIN_IDS):
             return
@@ -421,9 +476,9 @@ def register(bot: TeleBot, db: Database):
     # ==================== የተጠቃሚ አስተዳደር ====================
     
     @bot.message_handler(func=lambda m: m.text in ['👥 ተጠቃሚዎች', '👥 Users'])
-    def manage_users(message: Message):
+    def manage_users(message: Message, user_id: Optional[int] = None):
         """የተጠቃሚ አስተዳደር ሜኑ"""
-        user_id = message.from_user.id
+        user_id = user_id if user_id is not None else message.from_user.id
         
         if not is_admin(user_id, config.bot.ADMIN_IDS):
             return
@@ -449,9 +504,9 @@ def register(bot: TeleBot, db: Database):
     # ==================== ሪፖርቶች ====================
     
     @bot.message_handler(func=lambda m: m.text in ['📊 ሪፖርቶች', '📊 Reports'])
-    def show_reports(message: Message):
+    def show_reports(message: Message, user_id: Optional[int] = None):
         """የሪፖርት ሜኑ"""
-        user_id = message.from_user.id
+        user_id = user_id if user_id is not None else message.from_user.id
         
         if not is_admin(user_id, config.bot.ADMIN_IDS):
             return
@@ -477,9 +532,9 @@ def register(bot: TeleBot, db: Database):
     # ==================== የቅናሽ አስተዳደር ====================
     
     @bot.message_handler(func=lambda m: m.text in ['🏷️ ቅናሾች', '🏷️ Discounts'])
-    def manage_discounts(message: Message):
+    def manage_discounts(message: Message, user_id: Optional[int] = None):
         """የቅናሽ አስተዳደር ሜኑ"""
-        user_id = message.from_user.id
+        user_id = user_id if user_id is not None else message.from_user.id
         
         if not is_admin(user_id, config.bot.ADMIN_IDS):
             return
@@ -499,12 +554,41 @@ def register(bot: TeleBot, db: Database):
             reply_markup=markup,
             parse_mode='Markdown'
         )
+
+    @bot.message_handler(func=lambda m: m.text in ['⚙️ ቅንብሮች', '⚙️ Settings'])
+    def manage_settings(message: Message):
+        user_id = message.from_user.id
+        if not is_admin(user_id, config.bot.ADMIN_IDS):
+            return
+        text = (
+            "⚙️ ቅንብሮች\n\n"
+            "የቦት እና የክፍያ ምስጢራዊ ውቅሮች በአካባቢ ተለዋዋጮች ይተዳደራሉ።"
+            if get_user_lang(db, user_id) == 'am'
+            else "⚙️ Settings\n\nBot and payment credentials are managed through environment configuration."
+        )
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton(
+            "🔙 ወደ አስተዳዳሪ ፓነል" if get_user_lang(db, user_id) == 'am' else "🔙 Admin Panel",
+            callback_data="admin_back",
+        ))
+        bot.send_message(message.chat.id, text, reply_markup=markup)
+
+    @bot.message_handler(func=lambda m: m.text in ['🔙 ወደ መጀመሪያ', '🔙 Main Menu'])
+    def admin_back_to_main(message: Message):
+        user_id = message.from_user.id
+        if not is_admin(user_id, config.bot.ADMIN_IDS):
+            return
+        from handlers.start import show_welcome
+        show_welcome(message.chat.id, user_id, db, bot)
     
     # ==================== የአስተዳዳሪ መልእክት ማስተናገጃ ====================
     
     # ከዚህ በታች የ Callback እጅ አያያዞች
     
-    @bot.callback_query_handler(func=lambda call: call.data.startswith('admin_'))
+    @bot.callback_query_handler(func=lambda call: (
+        call.data.startswith('admin_')
+        and not call.data.startswith(('admin_order_', 'admin_find_user', 'admin_toggle_ban_'))
+    ))
     def handle_admin_callbacks(call: CallbackQuery):
         """የአስተዳዳሪ ጥሪ እጅ አያያዝ"""
         user_id = call.from_user.id
@@ -522,13 +606,37 @@ def register(bot: TeleBot, db: Database):
                 bot.delete_message(call.message.chat.id, call.message.message_id)
             except:
                 pass
-            show_admin_panel(call.message)
+            show_admin_panel(call.message, user_id=user_id)
             return
+
+        if data == 'admin_products':
+            manage_products(call.message, user_id=user_id)
+        elif data == 'admin_orders':
+            manage_orders(call.message, user_id=user_id)
+        elif data == 'admin_users':
+            manage_users(call.message, user_id=user_id)
+        elif data == 'admin_reports':
+            show_reports(call.message, user_id=user_id)
+        elif data == 'admin_discounts':
+            manage_discounts(call.message, user_id=user_id)
+        elif data == 'admin_settings':
+            text = (
+                "⚙️ ቅንብሮች\n\nየቦት እና የክፍያ ምስጢራዊ ውቅሮች በአካባቢ ተለዋዋጮች ይተዳደራሉ።"
+                if lang == 'am'
+                else "⚙️ Settings\n\nBot and payment credentials are managed through environment configuration."
+            )
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton(
+                "🔙 ወደ አስተዳዳሪ ፓነል" if lang == 'am' else "🔙 Admin Panel",
+                callback_data="admin_back",
+            ))
+            bot.send_message(call.message.chat.id, text, reply_markup=markup)
+        elif data == 'admin_back_to_orders':
+            show_orders_by_status(call.message, None, db, bot, user_id=user_id)
+        elif data == 'admin_add_product':
+            start_add_product(call, db, bot, user_id=user_id)
         
         # ምርት መጨመር
-        elif data == 'admin_add_product':
-            start_add_product(call.message, db, bot)
-        
         # ምርቶች መዘርዘር
         elif data == 'admin_list_products':
             list_products(call.message, db, bot)
@@ -547,15 +655,17 @@ def register(bot: TeleBot, db: Database):
         
         # ትዕዛዞች
         elif data == 'admin_all_orders':
-            show_orders_by_status(call.message, None, db, bot)
+            show_orders_by_status(call.message, None, db, bot, user_id=user_id)
         elif data == 'admin_pending_orders':
-            show_orders_by_status(call.message, 'Pending', db, bot)
+            show_orders_by_status(call.message, 'Pending', db, bot, user_id=user_id)
         elif data == 'admin_processing_orders':
-            show_orders_by_status(call.message, 'Processing', db, bot)
+            show_orders_by_status(call.message, 'Processing', db, bot, user_id=user_id)
         elif data == 'admin_shipped_orders':
-            show_orders_by_status(call.message, 'Shipped', db, bot)
+            show_orders_by_status(call.message, 'Shipped', db, bot, user_id=user_id)
         elif data == 'admin_completed_orders':
-            show_orders_by_status(call.message, 'Delivered', db, bot)
+            show_orders_by_status(call.message, 'Completed', db, bot, user_id=user_id)
+        elif data == 'admin_cancelled_orders':
+            show_orders_by_status(call.message, 'Cancelled', db, bot, user_id=user_id)
         
         # ተጠቃሚዎች
         elif data == 'admin_all_users':
@@ -590,16 +700,13 @@ def register(bot: TeleBot, db: Database):
     def get_admin_menu(user_id: int, lang: str) -> ReplyKeyboardMarkup:
         """የአስተዳዳሪ ሜኑ መፍጠር"""
         markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-        
-        buttons = [
-            "📦 ምርቶች",
-            "📋 ትዕዛዞች",
-            "👥 ተጠቃሚዎች",
-            "📊 ሪፖርቶች",
-            "🏷️ ቅናሾች",
-            "⚙️ ቅንብሮች",
-            "🔙 ወደ መጀመሪያ"
-        ]
+        buttons = (
+            ["📦 ምርቶች", "📋 ትዕዛዞች", "👥 ተጠቃሚዎች", "📊 ሪፖርቶች",
+             "🏷️ ቅናሾች", "⚙️ ቅንብሮች", "🔙 ወደ መጀመሪያ"]
+            if lang == 'am'
+            else ["📦 Products", "📋 Orders", "👥 Users", "📊 Reports",
+                  "🏷️ Discounts", "⚙️ Settings", "🔙 Main Menu"]
+        )
         
         markup.add(*[KeyboardButton(btn) for btn in buttons])
         return markup
@@ -643,13 +750,19 @@ def register(bot: TeleBot, db: Database):
     
     # ==================== ምርት መጨመር ሂደት ====================
     
-    def start_add_product(message: Message, db: Database, bot: TeleBot):
+    def start_add_product(
+        message: Message,
+        db: Database,
+        bot: TeleBot,
+        user_id: Optional[int] = None,
+    ):
         """አዲስ ምርት መጨመር ሂደት መጀመር"""
-        user_id = message.from_user.id
-        admin_states[user_id] = {'action': 'add_product', 'step': 1, 'data': {}}
+        user_id = user_id if user_id is not None else message.from_user.id
+        state = _ensure_add_product_state(user_id)
+        state.update(step=1, data={})
         
         prompt = bot.send_message(
-            message.chat.id,
+            _get_admin_chat_id(message),
             "📝 *አዲስ ምርት መጨመር*\n\n"
             "የምርቱን ስም በአማርኛ ያስገቡ:",
             parse_mode='Markdown'
@@ -659,8 +772,9 @@ def register(bot: TeleBot, db: Database):
     def process_add_product_name(message: Message, db: Database, bot: TeleBot):
         """የምርት ስም በአማርኛ ማስኬድ"""
         user_id = message.from_user.id
-        admin_states[user_id]['data']['name_am'] = message.text
-        admin_states[user_id]['step'] = 2
+        state = _ensure_add_product_state(user_id)
+        state['data']['name_am'] = message.text
+        state['step'] = 2
         
         bot.send_message(
             message.chat.id,
@@ -671,8 +785,9 @@ def register(bot: TeleBot, db: Database):
     def process_add_product_name_en(message: Message, db: Database, bot: TeleBot):
         """የምርት ስም በእንግሊዝኛ ማስኬድ"""
         user_id = message.from_user.id
-        admin_states[user_id]['data']['name_en'] = message.text
-        admin_states[user_id]['step'] = 3
+        state = _ensure_add_product_state(user_id)
+        state['data']['name_en'] = message.text
+        state['step'] = 3
         
         bot.send_message(
             message.chat.id,
@@ -686,8 +801,9 @@ def register(bot: TeleBot, db: Database):
         
         try:
             price = float(message.text)
-            admin_states[user_id]['data']['price'] = price
-            admin_states[user_id]['step'] = 4
+            state = _ensure_add_product_state(user_id)
+            state['data']['price'] = price
+            state['step'] = 4
             
             bot.send_message(
                 message.chat.id,
@@ -704,8 +820,9 @@ def register(bot: TeleBot, db: Database):
     def process_add_product_size(message: Message, db: Database, bot: TeleBot):
         """የምርት መጠን ማስኬድ"""
         user_id = message.from_user.id
-        admin_states[user_id]['data']['size'] = message.text.upper()
-        admin_states[user_id]['step'] = 5
+        state = _ensure_add_product_state(user_id)
+        state['data']['size'] = message.text.upper()
+        state['step'] = 5
         
         markup = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True, row_width=2)
         markup.add("Men", "Women", "Accessories")
@@ -729,8 +846,9 @@ def register(bot: TeleBot, db: Database):
             bot.register_next_step_handler(message, process_add_product_category, db, bot)
             return
         
-        admin_states[user_id]['data']['category'] = message.text
-        admin_states[user_id]['step'] = 6
+        state = _ensure_add_product_state(user_id)
+        state['data']['category'] = message.text
+        state['step'] = 6
         
         bot.send_message(
             message.chat.id,
@@ -745,8 +863,9 @@ def register(bot: TeleBot, db: Database):
         
         try:
             stock = int(message.text)
-            admin_states[user_id]['data']['stock_quantity'] = stock
-            admin_states[user_id]['step'] = 7
+            state = _ensure_add_product_state(user_id)
+            state['data']['stock_quantity'] = stock
+            state['step'] = 7
             
             bot.send_message(
                 message.chat.id,
@@ -775,7 +894,17 @@ def register(bot: TeleBot, db: Database):
         
         admin_uploading.discard(user_id)
         image_id = message.photo[-1].file_id
-        data = admin_states[user_id]['data']
+        state = _ensure_add_product_state(user_id)
+        data = state['data']
+        required_fields = ('name_am', 'name_en', 'price', 'size', 'category', 'stock_quantity')
+        if any(field not in data for field in required_fields):
+            _send_admin_message(
+                bot,
+                message,
+                "❌ የምርት መጨመር ሂደቱ ጊዜው አልፏል። እባክዎ /add እንደገና ይጀምሩ።",
+            )
+            admin_states.pop(user_id, None)
+            return
         
         # ምርት መፍጠር
         product_data = {
@@ -825,19 +954,89 @@ def register(bot: TeleBot, db: Database):
 
 # ==================== ሌሎች የአስተዳዳሪ ተግባራት ====================
 
-def show_orders_by_status(message: Message, status: Optional[str], db: Database, bot: TeleBot):
+def show_orders_by_status(
+    message: Message,
+    status: Optional[str],
+    db: Database,
+    bot: TeleBot,
+    user_id: Optional[int] = None,
+):
     """ትዕዛዞችን በሁኔታ ማሳየት"""
-    orders = db.get_orders_by_status(status) if hasattr(db, 'get_orders_by_status') else []
+    orders = db.get_orders_by_status(status)
     if not orders:
-        bot.send_message(message.chat.id, "📋 ምንም ትዕዛዞች አልተገኙም.")
-        return "no orders"
+        lang = get_user_lang(db, user_id if user_id is not None else message.from_user.id)
+        bot.send_message(
+            message.chat.id,
+            "📋 ምንም ትዕዛዞች አልተገኙም." if lang == 'am' else "📋 No orders found.",
+        )
+        return orders
 
-    summary = "\n".join(
-        f"• {order.get('order_number', 'N/A')} - {order.get('status', status or 'Unknown')}"
-        for order in orders[:10]
+    lang = get_user_lang(db, user_id if user_id is not None else message.from_user.id)
+    for order in orders[:20]:
+        items = order.get('items') or []
+        if isinstance(items, str):
+            try:
+                items = json.loads(items)
+            except json.JSONDecodeError:
+                logger.exception("Could not decode order items for order %s", order.get('id'))
+                items = []
+        order['items'] = items
+        text, keyboard = format_admin_order_card(order, lang)
+        bot.send_message(
+            message.chat.id,
+            text,
+            reply_markup=keyboard,
+        )
+    return orders
+
+
+def format_admin_order_card(order: Dict, lang: str = 'am'):
+    """Build a complete admin order card and its supported status actions."""
+    items = order.get('items') or []
+    item_lines = []
+    for item in items:
+        name = (
+            (item.get('name_am') if lang == 'am' else item.get('name_en'))
+            or item.get('name_am')
+            or item.get('name')
+            or 'Item'
+        )
+        item_lines.append(
+            f"• {name} × {item.get('quantity', 0)}"
+            f" · {format_currency(item.get('total_price', 0))}"
+        )
+    status = str(order.get('status') or 'Pending')
+    status_label = {
+        'pending': ('⏳ በመጠባበቅ', '⏳ Pending'),
+        'processing': ('🔄 በሂደት', '🔄 Processing'),
+        'shipped': ('🚚 ተልኳል', '🚚 Shipped'),
+        'delivered': ('✔️ ተጠናቋል', '✔️ Completed'),
+        'completed': ('✔️ ተጠናቋል', '✔️ Completed'),
+        'cancelled': ('❌ ተሰርዟል', '❌ Cancelled'),
+    }.get(status.strip().lower(), (status, status))
+    labels = (
+        ("📋 ትዕዛዝ", "👤 ደንበኛ", "📱 ስልክ", "📦 ምርቶች",
+         "💰 ጠቅላላ", "📍 አድራሻ", "💳 ክፍያ")
+        if lang == 'am'
+        else ("📋 Order", "👤 Customer", "📱 Phone", "📦 Items",
+              "💰 Total", "📍 Address", "💳 Payment")
     )
-    bot.send_message(message.chat.id, f"📋 ትዕዛዞች\n\n{summary}")
-    return summary
+    text = (
+        f"{labels[0]} #{order.get('order_number', order.get('id', 'N/A'))}\n"
+        f"{labels[1]}: {order.get('customer_name') or 'Customer'}\n"
+        f"{labels[2]}: {order.get('customer_phone') or '—'}\n"
+        f"📌 {status_label[0 if lang == 'am' else 1]}\n"
+        f"{labels[3]}:\n{chr(10).join(item_lines) if item_lines else '—'}\n"
+        f"{labels[4]}: {format_currency(order.get('final_amount', 0))}\n"
+        f"{labels[5]}: {order.get('shipping_address') or '—'}\n"
+        f"{labels[6]}: {format_payment_method(order.get('payment_method'), lang)}"
+    )
+    keyboard = get_admin_order_actions_keyboard(
+        order['id'],
+        status=status,
+        lang=lang,
+    )
+    return text, keyboard
 
 
 def show_all_users(message: Message, db: Database, bot: TeleBot):
@@ -996,25 +1195,25 @@ def process_delete_product(
 ):
     """Validate and delete a product requested by an administrator."""
     if not is_admin(message.from_user.id, config.bot.ADMIN_IDS):
-        bot.reply_to(message, "⛔ ይህን ለማድረግ ፈቃድ የለዎትም!")
+        _send_admin_message(bot, message, "⛔ ይህን ለማድረግ ፈቃድ የለዎትም!")
         return False
 
     value = product_id_text or (message.text or '').strip()
     try:
         product_id = int(value)
     except ValueError:
-        bot.reply_to(message, "❌ እባክዎ ትክክለኛ የምርት ID ያስገቡ።")
+        _send_admin_message(bot, message, "❌ እባክዎ ትክክለኛ የምርት ID ያስገቡ።")
         return False
 
     if product_id <= 0 or not db.get_product(product_id):
-        bot.reply_to(message, "❌ ይህ ምርት አልተገኘም።")
+        _send_admin_message(bot, message, "❌ ይህ ምርት አልተገኘም።")
         return False
 
     if not db.delete_product(product_id):
-        bot.reply_to(message, "❌ ምርቱን መሰረዝ አልተቻለም።")
+        _send_admin_message(bot, message, "❌ ምርቱን መሰረዝ አልተቻለም።")
         return False
 
-    bot.reply_to(message, f"✅ ምርት #{product_id} ተሰርዟል።")
+    _send_admin_message(bot, message, f"✅ ምርት #{product_id} ተሰርዟል።")
     db.log_activity(message.from_user.id, 'delete_product', f'Product ID: {product_id}')
     return True
 
@@ -1031,6 +1230,34 @@ def show_low_stock(message: Message, db: Database, bot: TeleBot):
     return products
 
 
-def show_admin_panel(message: Message):
-    """የአስተዳዳሪ ፓነል ማሳየት"""
-    return {"status": "ok", "chat_id": getattr(message.chat, 'id', None)}
+def show_admin_panel(message: Message, db: Database, bot: TeleBot):
+    """Render the inline admin panel for commands and package-level callers."""
+    user_id = message.from_user.id
+    if not is_admin(user_id, config.bot.ADMIN_IDS):
+        return bot.send_message(message.chat.id, "⛔ You are not authorized to use the admin panel.")
+    lang = get_user_lang(db, user_id)
+    return bot.send_message(
+        message.chat.id,
+        "⚙️ የአስተዳዳሪ ፓነል" if lang == 'am' else "⚙️ Admin Panel",
+        reply_markup=get_admin_keyboard(lang),
+    )
+
+
+def show_stats(message: Message, db: Database, bot: TeleBot):
+    """Show the admin dashboard summary for the /stats command."""
+    if not is_admin(message.from_user.id, config.bot.ADMIN_IDS):
+        return bot.send_message(message.chat.id, "⛔ You are not authorized to view statistics.")
+    order_stats = db.get_order_stats()
+    summary = order_stats.get('summary', {})
+    pending = next(
+        (value.get('count', 0) for key, value in order_stats.items() if key.lower() == 'pending'),
+        0,
+    )
+    text = (
+        f"👥 Users: {db.get_user_count()}\n"
+        f"📦 Products: {db.get_product_count()}\n"
+        f"📋 Orders: {summary.get('total_orders', 0)}\n"
+        f"⏳ Pending: {pending}\n"
+        f"💰 Revenue: {format_currency(summary.get('total_revenue', 0))}"
+    )
+    return bot.send_message(message.chat.id, text)

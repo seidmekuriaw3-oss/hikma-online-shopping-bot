@@ -11,10 +11,11 @@ import threading
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from telebot import TeleBot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from database import Database
 from config import config
-from utils.helpers import get_text, format_currency
+from utils.helpers import get_text, format_currency, format_payment_method
 from utils.logger import get_logger
 
 logger = get_logger('notifications')
@@ -152,20 +153,26 @@ def send_order_confirmation(bot: TeleBot, order_id: int, db: Database):
     for item in items:
         product = db.get_product(item['product_id'])
         name = product['name_am'] if product else 'N/A'
-        msg += f"• {name} × {item['quantity']} = {format_currency(item['total_price'])} ETB\n"
+        msg += f"• {name} × {item['quantity']} = {format_currency(item['total_price'])}\n"
     
-    msg += f"\n💰 {get_text(lang, 'total')}: {format_currency(order['final_amount'])} ETB\n"
+    msg += f"\n💰 {get_text(lang, 'total')}: {format_currency(order['final_amount'])}\n"
     
     if order['shipping_address']:
         msg += f"\n📍 {get_text(lang, 'shipping_address')}: {order['shipping_address']}"
     
     msg += f"\n\n📌 {get_text(lang, 'order_status')}: {order['status']}\n"
-    msg += f"📋 {get_text(lang, 'track_order')}: /orders"
+    msg += "የትዕዛዞችዎን ለማየት ከታች ይጫኑ።" if lang == 'am' else "View your orders using the button below."
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton(
+        "📋 ትዕዛዞቼን እይ" if lang == 'am' else "📋 View My Orders",
+        callback_data="view_orders",
+    ))
     
     try:
         bot.send_message(
             user['user_id'],
             msg,
+            reply_markup=markup,
             parse_mode='Markdown'
         )
         logger.info(f"የትዕዛዝ ማረጋገጫ ለ {order['user_id']} ተልኳል")
@@ -191,8 +198,8 @@ def send_payment_confirmation(bot: TeleBot, payment_id: int, db: Database):
     
     # መልዕክት መፍጠር
     msg = f"✅ *{get_text(lang, 'payment_confirmation')}*\n\n"
-    msg += f"💰 {get_text(lang, 'amount')}: {format_currency(payment['amount'])} ETB\n"
-    msg += f"💳 {get_text(lang, 'method')}: {payment['method']}\n"
+    msg += f"💰 {get_text(lang, 'amount')}: {format_currency(payment['amount'])}\n"
+    msg += f"💳 {format_payment_method(payment.get('method'), lang)}\n"
     msg += f"🔢 {get_text(lang, 'transaction_id')}: {payment['transaction_id']}\n"
     msg += f"📅 {get_text(lang, 'date')}: {payment['completed_at'] or payment['created_at']}\n\n"
     msg += f"📌 {get_text(lang, 'payment_status')}: {payment['status']}"
@@ -259,14 +266,20 @@ def send_product_notification(bot: TeleBot, product_id: int, db: Database):
             
             msg = f"🆕 *{get_text(lang, 'new_product')}*\n\n"
             msg += f"📦 {name}\n"
-            msg += f"💰 {get_text(lang, 'price')}: {format_currency(product['price'])} ETB\n"
+            msg += f"💰 {get_text(lang, 'price')}: {format_currency(product['price'])}\n"
             msg += f"📏 {get_text(lang, 'size')}: {product['size']}\n\n"
-            msg += f"👉 /product_{product_id} {get_text(lang, 'view_product')}"
+            msg += f"👉 {get_text(lang, 'view_product')}"
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton(
+                "🛍️ ምርቱን ይመልከቱ" if lang == 'am' else "🛍️ View Product",
+                callback_data=f"product_view_{product_id}",
+            ))
             
             bot.send_photo(
                 user['user_id'],
                 product['image_id'],
                 caption=msg,
+                reply_markup=markup,
                 parse_mode='Markdown'
             )
             sent += 1

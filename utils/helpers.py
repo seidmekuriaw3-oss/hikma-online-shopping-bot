@@ -153,6 +153,22 @@ def format_currency(amount: float, currency: str = 'ETB') -> str:
         return f"{amount} {currency}"
 
 
+def format_payment_method(method: Optional[str], lang: str = 'am') -> str:
+    """Render payment identifiers as customer-friendly localized labels."""
+    normalized = (method or '').strip().lower().replace('-', '_').replace(' ', '_')
+    labels = {
+        'cash': ("💵 በጥሬ ገንዘብ (Cash on Delivery)", "💵 Cash on Delivery"),
+        'cash_on_delivery': ("💵 በጥሬ ገንዘብ (Cash on Delivery)", "💵 Cash on Delivery"),
+        'bank': ("🏦 በባንክ ማስተላለፍ (Bank Transfer)", "🏦 Bank Transfer"),
+        'bank_transfer': ("🏦 በባንክ ማስተላለፍ (Bank Transfer)", "🏦 Bank Transfer"),
+        'chapa': ("💳 Chapa", "💳 Chapa"),
+        'telebirr': ("📱 Telebirr", "📱 Telebirr"),
+    }
+    if normalized in labels:
+        return labels[normalized][0 if lang == 'am' else 1]
+    return (method or '—').replace('_', ' ').title()
+
+
 def format_date(date_str: str) -> str:
     """ቀን ፎርማት ማድረግ"""
     try:
@@ -188,7 +204,7 @@ def format_duration(seconds: int) -> str:
 
 # ==================== ጄኔሬተር ====================
 
-def generate_order_number(prefix: str = 'ZEN') -> str:
+def generate_order_number(prefix: str = 'HIK') -> str:
     """የትዕዛዝ ቁጥር መፍጠር"""
     timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
     random_part = ''.join(random.choices(string.digits, k=4))
@@ -198,8 +214,8 @@ def generate_order_number(prefix: str = 'ZEN') -> str:
 def generate_referral_code(user_id: int = None) -> str:
     """የማጣቀሻ ኮድ መፍጠር"""
     if user_id:
-        return f"ZEN{user_id}{datetime.now().strftime('%m%d')}"
-    return f"ZEN{''.join(random.choices(string.ascii_uppercase + string.digits, k=6))}"
+        return f"HIK{user_id}{datetime.now().strftime('%m%d')}"
+    return f"HIK{''.join(random.choices(string.ascii_uppercase + string.digits, k=6))}"
 
 
 def generate_random_string(length: int = 8, include_digits: bool = True) -> str:

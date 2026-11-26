@@ -15,9 +15,27 @@ from telebot.types import Message, ReplyKeyboardMarkup, KeyboardButton
 
 from database import Database
 from utils.helpers import get_text, get_user_lang
-from keyboards.reply import get_main_menu, get_admin_menu
+from keyboards.inline import get_contact_keyboard
 
 logger = logging.getLogger(__name__)
+
+
+def show_contact_info(message: Message, db: Database, bot: TeleBot):
+    lang = get_user_lang(db, message.from_user.id)
+    text = (
+        "🛍️ ሂክማ ኦንላይን ሾፒንግ\n\n"
+        "📍 የመላኪያ አድራሻ ለማዘጋጀት ከግዢ ሂደቱ ውስጥ ያስገቡ።\n"
+        "💬 ለጥያቄዎች ከታች ያለውን አዝራር ይጠቀሙ።"
+        if lang == 'am'
+        else "🛍️ Hikma Online Shopping\n\n"
+        "📍 Add your delivery address during checkout.\n"
+        "💬 For questions, use the contact button below."
+    )
+    return bot.send_message(
+        message.chat.id,
+        text,
+        reply_markup=get_contact_keyboard(lang),
+    )
 
 
 def toggle_subscription(message: Message, db: Database, bot: TeleBot, subscribe: bool):
@@ -36,7 +54,10 @@ def register(bot: TeleBot, db: Database):
     
     # ==================== ሁሉንም መልዕክቶች አያያዝ ====================
     
-    @bot.message_handler(func=lambda message: True, content_types=['text'])
+    @bot.message_handler(
+        func=lambda message: bool(message.text) and not message.text.lstrip().startswith('/'),
+        content_types=['text'],
+    )
     def handle_text_messages(message: Message):
         """ሁሉንም የጽሁፍ መልዕክቶች አያያዝ"""
         user_id = message.from_user.id
@@ -63,13 +84,13 @@ def register(bot: TeleBot, db: Database):
         
         # የምርት ምድቦች
         if text in ['👕 የወንድ ልብሶች', '👕 Men\'s Clothing', 'የወንድ ልብሶች 👕', 'Men\'s Clothing 👕']:
-            from handlers import messages as message_handlers
-            message_handlers.show_products_by_category(message, 'Men', db, bot)
+            from handlers.products import show_category_products
+            show_category_products(message, 'Men', db, bot)
             return
         
         if text in ['👗 የሴት ልብሶች', '👗 Women\'s Clothing', 'የሴት ልብሶች 👗', 'Women\'s Clothing 👗']:
-            from handlers import messages as message_handlers
-            message_handlers.show_products_by_category(message, 'Women', db, bot)
+            from handlers.products import show_category_products
+            show_category_products(message, 'Women', db, bot)
             return
         
         # ትዕዛዞች
@@ -91,7 +112,10 @@ def register(bot: TeleBot, db: Database):
             return
         
         # አድራሻ
-        if text in ['📍 አድራሻ', '📍 Address', 'አድራሻ እና ስልክ 📍', 'Address & Phone 📍']:
+        if text in [
+            '📍 አድራሻ', '📍 Address', 'አድራሻ እና ስልክ 📍',
+            'Address & Phone 📍', '📍 አድራሻ እና ስልክ', '📍 Address & Phone',
+        ]:
             show_contact_info(message, db, bot)
             return
         
@@ -100,7 +124,10 @@ def register(bot: TeleBot, db: Database):
             toggle_subscription(message, db, bot, subscribe=True)
             return
         
-        if text in ['🔕 ከማስታወቂያ ተመዝገብ', '🔕 Unsubscribe', 'ከማስታወቂያ ተመዝገብ 🔕', 'Unsubscribe 🔕']:
+        if text in [
+            '🔕 ከማስታወቂያ ተመዝገብ', '🔕 Unsubscribe',
+            'ከማስታወቂያ ተመዝገብ 🔕', 'Unsubscribe 🔕', '🔕 ከማስታወቂያ ውጣ',
+        ]:
             toggle_subscription(message, db, bot, subscribe=False)
             return
         
@@ -173,20 +200,7 @@ def register(bot: TeleBot, db: Database):
     # ==================== ረዳት ተግባራት ====================
     
     def show_contact_info(message: Message, db: Database, bot: TeleBot):
-        """የአድራሻ መረጃ ማሳየት"""
-        lang = get_user_lang(db, message.from_user.id)
-        
-        contact_msg = get_text(lang, 'contact_info')
-        
-        markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
-        markup.add(KeyboardButton(get_text(lang, 'back')))
-        
-        bot.send_message(
-            message.chat.id,
-            contact_msg,
-            reply_markup=markup,
-            parse_mode='Markdown'
-        )
+        return globals()['show_contact_info'](message, db, bot)
     
     def handle_other_messages(message: Message, db: Database, bot: TeleBot):
         """ሌሎች መልዕክቶችን አያያዝ"""

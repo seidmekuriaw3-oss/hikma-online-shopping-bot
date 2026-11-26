@@ -27,7 +27,7 @@ def show_welcome(chat_id: int, user_id: int, db: Database, bot: TeleBot):
     user = db.get_user(user_id)
     welcome_msg = get_text(lang, 'welcome_msg')
     first_name = user['first_name'] if user else 'ደንበኛ'
-    msg = f"👋 *እንኳን ደህና መጡ {first_name}!*\n\n"
+    msg = f"👋 እንኳን ደህና መጡ {first_name}!\n\n"
     msg += f"{welcome_msg}\n\n"
     msg += "📌 ከታች ካሉት አዝራሮች ይምረጡ:"
     bot.send_message(chat_id, msg, reply_markup=get_main_menu(user_id, db))
@@ -205,16 +205,6 @@ def register_additional_commands(bot: TeleBot, db: Database):
         """የ /cart ትዕዛዝ - ጋሪ ማሳየት"""
         from handlers.orders import show_cart
         show_cart(message, db, bot)
-    
-    @bot.message_handler(commands=['lang'])
-    def lang_command(message: Message):
-        """የ /lang ትዕዛዝ - ቋንቋ መቀየር"""
-        markup = get_language_menu()
-        bot.send_message(
-            message.chat.id,
-            "🌍 ቋንቋ ይምረጡ / Choose Language:",
-            reply_markup=markup
-        )
     
     @bot.message_handler(commands=['admin'])
     def admin_command(message: Message):

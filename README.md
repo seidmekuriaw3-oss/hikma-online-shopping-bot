@@ -17,7 +17,15 @@ Quick start
 
 3. Copy `.env.example` to `.env`, then set the required secrets and database values:
 
-	`BOT_TOKEN`, `ADMIN_USERNAME`, `ADMIN_IDS`, `DATABASE_URL`, and `SECRET_KEY`
+	`BOT_TOKEN`, `ADMIN_IDS`, `POSTGRES_DB`, `POSTGRES_USER`,
+	`POSTGRES_PASSWORD`, and `DATABASE_URL`. Set `ADMIN_USERNAME` to enable
+	the admin contact button; production deployments also require `SECRET_KEY`.
+
+Keep the PostgreSQL credentials in `DATABASE_URL` consistent with the three
+`POSTGRES_*` values. Use a URL-safe password (letters, numbers, `-`, `_`) so
+Docker Compose can safely build the container connection URL. The example
+`DATABASE_URL` targets a PostgreSQL server running on the host at port 5433;
+Docker Compose overrides it to connect to its `postgres` service.
 
 Set `BANK_NAME`, `BANK_ACCOUNT_HOLDER`, `BANK_ACCOUNT_NUMBER`, and
 `BANK_BUSINESS_CODE` only if you want to offer bank-transfer payments.
@@ -40,10 +48,12 @@ Project layout
 
 Docker
 
-Build and run with:
+Start the bot and PostgreSQL together with:
 
-	docker build -t hikma-online-shopping-bot .
-	docker run --env-file .env -p 8000:8000 hikma-online-shopping-bot
+	docker compose up --build
+
+The PostgreSQL data is persisted in the `postgres_data` volume. Back it up
+before applying schema changes to an existing deployment.
 
 Testing
 

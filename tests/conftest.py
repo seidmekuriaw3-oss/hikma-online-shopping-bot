@@ -1,7 +1,8 @@
 import os
 
-# Database integration tests should provide a disposable PostgreSQL URL.
+# Tests must not inherit production-mode validation or connect to a real database.
+os.environ['ENVIRONMENT'] = 'test'
 os.environ.setdefault(
 	"DATABASE_URL",
-	"postgresql://hikma:hikma_password@127.0.0.1:5433/hikma_test",
+	"postgresql://localhost/hikma_test",
 )

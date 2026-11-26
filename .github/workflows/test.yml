@@ -10,7 +10,7 @@ jobs:
     env:
       BOT_TOKEN: "123:TEST_TOKEN"
       ADMIN_IDS: "123456789"
-      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/postgres"
+      DATABASE_URL: "postgresql://localhost/hikma_test"
       SECRET_KEY: "test-secret-key"
     steps:
       - uses: actions/checkout@v4

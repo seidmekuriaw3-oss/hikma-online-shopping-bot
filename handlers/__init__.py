@@ -7,9 +7,11 @@ Hikma Online Shopping Bot - የመልዕክት እጅ አያያዝ
 
 import logging
 import re
+from functools import wraps
 from typing import Optional
 from datetime import datetime
 
+import psycopg2
 from telebot import TeleBot
 from telebot.types import Message, ReplyKeyboardMarkup, KeyboardButton
 
@@ -19,6 +21,49 @@ from keyboards.reply import get_main_menu, get_admin_menu
 from utils.helpers import format_currency
 
 logger = logging.getLogger(__name__)
+
+
+class _DatabaseErrorReportingBot:
+    """Report PostgreSQL failures from message and callback handlers safely."""
+
+    def __init__(self, bot):
+        self._bot = bot
+
+    def __getattr__(self, name):
+        return getattr(self._bot, name)
+
+    def _wrap(self, handler):
+        @wraps(handler)
+        def guarded(update, *args, **kwargs):
+            try:
+                return handler(update, *args, **kwargs)
+            except psycopg2.Error:
+                message = (
+                    "⚠️ የውሂብ ጎታ አገልግሎት ለጊዜው አልተገኘም። እባክዎ ቆይተው ይሞክሩ።\n"
+                    "The shopping service is temporarily unavailable. Please try again later."
+                )
+                try:
+                    if hasattr(update, 'data') and hasattr(update, 'id'):
+                        self._bot.answer_callback_query(update.id, message, show_alert=True)
+                    elif getattr(update, 'chat', None):
+                        self._bot.send_message(update.chat.id, message)
+                except Exception:
+                    logger.exception("Could not notify the user about a database failure")
+                return None
+        return guarded
+
+    def message_handler(self, *args, **kwargs):
+        decorator = self._bot.message_handler(*args, **kwargs)
+        return lambda handler: decorator(self._wrap(handler))
+
+    def callback_query_handler(self, *args, **kwargs):
+        decorator = self._bot.callback_query_handler(*args, **kwargs)
+        return lambda handler: decorator(self._wrap(handler))
+
+    def register_next_step_handler(self, message, callback, *args, **kwargs):
+        return self._bot.register_next_step_handler(
+            message, self._wrap(callback), *args, **kwargs
+        )
 
 
 def toggle_subscription(message: Message, db: Database, bot: TeleBot, subscribe: bool):
@@ -36,65 +81,27 @@ def toggle_subscription(message: Message, db: Database, bot: TeleBot, subscribe:
 
 
 def show_products_by_category(message: Message, category: str, db: Database, bot: TeleBot):
-    """Display products selected from the reply keyboard."""
-    lang = get_user_lang(db, message.from_user.id)
-    products = db.get_products(category=category, limit=20, offset=0)
-    if not products:
-        bot.send_message(message.chat.id, get_text(lang, 'no_products_in_category'))
-        return []
-
-    lines = [f"📦 {get_text(lang, category.lower())}", '']
-    for product in products[:10]:
-        name = product.get('name_am') if lang == 'am' else product.get('name_en')
-        lines.append(f"• {name or product.get('name_am', 'N/A')} - {format_currency(product.get('price', 0))}")
-        lines.append(f"  /product {product['id']}")
-    bot.send_message(message.chat.id, '\n'.join(lines))
-    return products
+    from handlers.products import show_category_products as show
+    return show(message, category, db, bot)
 
 
 def show_user_orders(message: Message, db: Database, bot: TeleBot):
-    """Display the current user's recent orders."""
-    orders = db.get_user_orders(message.from_user.id, limit=10)
-    if not orders:
-        bot.send_message(message.chat.id, "📋 እስካሁን ትዕዛዝ የለዎትም።")
-        return []
-    text = '\n'.join(
-        f"• {order.get('order_number', order.get('id', 'N/A'))} - {order.get('status', 'N/A')} - {format_currency(order.get('final_amount', 0))}"
-        for order in orders
-    )
-    bot.send_message(message.chat.id, f"📋 ትዕዛዞቼ\n\n{text}")
-    return orders
+    from handlers.orders import show_user_orders as show
+    if show:
+        return show(message, db, bot)
+    return None
 
 
 def show_cart(message: Message, db: Database, bot: TeleBot):
-    """Display the current user's cart."""
-    cart = db.get_cart(message.from_user.id)
-    items = cart.get('items', []) if cart else []
-    if not items:
-        bot.send_message(message.chat.id, "🛒 ጋሪዎ ባዶ ነው።")
-        return []
-    text = '\n'.join(
-        f"• {item.get('name', 'N/A')} x{item.get('quantity', 0)} - {format_currency(item.get('price', 0))}"
-        for item in items
-    )
-    bot.send_message(message.chat.id, f"🛒 ጋሪ\n\n{text}")
-    return items
+    from handlers.orders import show_cart as show
+    if show:
+        return show(message, db, bot)
+    return None
 
 
 def show_user_profile(message: Message, db: Database, bot: TeleBot):
-    """Display a compact user profile."""
-    user = db.get_user(message.from_user.id)
-    if not user:
-        bot.send_message(message.chat.id, "👤 መገለጫዎ አልተገኘም።")
-        return None
-    text = (
-        f"👤 መገለጫ\n\n"
-        f"📝 ስም: {user.get('first_name', '')} {user.get('last_name', '')}\n"
-        f"🔹 Username: @{user.get('username') or 'N/A'}\n"
-        f"📱 ስልክ: {user.get('phone') or 'N/A'}"
-    )
-    bot.send_message(message.chat.id, text)
-    return user
+    from handlers.user import show_user_profile as show
+    return show(message, db, bot)
 
 
 def show_admin_panel(message: Message, db: Database, bot: TeleBot):
@@ -111,10 +118,12 @@ def register_handlers(bot: TeleBot, db: Database):
     """Package-level API expected by main.py."""
     from handlers import start, products, orders, payments, user, admin, callback
 
+    guarded_bot = _DatabaseErrorReportingBot(bot)
     # Register specific handlers before messages.py's catch-all text handler.
     for module in (start, products, orders, payments, user, admin, callback):
-        module.register(bot, db)
-    register(bot, db)
+        module.register(guarded_bot, db)
+    start.register_additional_commands(guarded_bot, db)
+    register(guarded_bot, db)
 
 
 def register(bot: TeleBot, db: Database):
@@ -122,7 +131,10 @@ def register(bot: TeleBot, db: Database):
     
     # ==================== ሁሉንም መልዕክቶች አያያዝ ====================
     
-    @bot.message_handler(func=lambda message: True, content_types=['text'])
+    @bot.message_handler(
+        func=lambda message: bool(message.text) and not message.text.lstrip().startswith('/'),
+        content_types=['text'],
+    )
     def handle_text_messages(message: Message):
         """ሁሉንም የጽሁፍ መልዕክቶች አያያዝ"""
         user_id = message.from_user.id
@@ -181,7 +193,10 @@ def register(bot: TeleBot, db: Database):
             return
         
         # አድራሻ
-        if text in ['📍 አድራሻ', '📍 Address', 'አድራሻ እና ስልክ 📍', 'Address & Phone 📍']:
+        if text in [
+            '📍 አድራሻ', '📍 Address', 'አድራሻ እና ስልክ 📍',
+            'Address & Phone 📍', '📍 አድራሻ እና ስልክ', '📍 Address & Phone',
+        ]:
             show_contact_info(message, db, bot)
             return
         
@@ -190,7 +205,10 @@ def register(bot: TeleBot, db: Database):
             toggle_subscription(message, db, bot, subscribe=True)
             return
         
-        if text in ['🔕 ከማስታወቂያ ተመዝገብ', '🔕 Unsubscribe', 'ከማስታወቂያ ተመዝገብ 🔕', 'Unsubscribe 🔕']:
+        if text in [
+            '🔕 ከማስታወቂያ ተመዝገብ', '🔕 Unsubscribe',
+            'ከማስታወቂያ ተመዝገብ 🔕', 'Unsubscribe 🔕', '🔕 ከማስታወቂያ ውጣ',
+        ]:
             toggle_subscription(message, db, bot, subscribe=False)
             return
         
@@ -263,20 +281,8 @@ def register(bot: TeleBot, db: Database):
     # ==================== ረዳት ተግባራት ====================
     
     def show_contact_info(message: Message, db: Database, bot: TeleBot):
-        """የአድራሻ መረጃ ማሳየት"""
-        lang = get_user_lang(db, message.from_user.id)
-        
-        contact_msg = get_text(lang, 'contact_info')
-        
-        markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
-        markup.add(KeyboardButton(get_text(lang, 'back')))
-        
-        bot.send_message(
-            message.chat.id,
-            contact_msg,
-            reply_markup=markup,
-            parse_mode='Markdown'
-        )
+        from handlers.messages import show_contact_info as show
+        return show(message, db, bot)
     
     def handle_other_messages(message: Message, db: Database, bot: TeleBot):
         """ሌሎች መልዕክቶችን አያያዝ"""

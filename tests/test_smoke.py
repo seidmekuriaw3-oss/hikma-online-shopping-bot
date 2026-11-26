@@ -30,6 +30,8 @@ def _fake_db():
         get_product_count=lambda: 3,
         get_order_stats=lambda: {"summary": {"total_orders": 2, "total_revenue": 100.0}},
         get_daily_stats=lambda: {"new_orders": 1},
+        get_orders_by_status=lambda status=None: [],
+        get_user=lambda user_id: {"user_id": user_id, "lang": "am"},
         get_all_users=lambda: [{"user_id": 1, "first_name": "Jane"}],
         get_active_users=lambda days=7: [{"user_id": 1, "first_name": "Jane"}],
         get_products=lambda **kwargs: [{"id": 1, "name_am": "ምርት", "price": 10.0}],
@@ -74,7 +76,7 @@ def test_admin_placeholder_functions_return_non_none():
     assert start_edit_product(message, db, bot) is not None
     assert start_delete_product(message, db, bot) is not None
     assert show_low_stock(message, db, bot) is not None
-    assert show_admin_panel(message) is not None
+    assert show_admin_panel(message, db, bot) is not None
 
 
 def test_start_add_product_registers_next_step_on_prompt_message():

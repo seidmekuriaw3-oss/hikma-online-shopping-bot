@@ -9,7 +9,7 @@ from typing import Optional, List
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import config
-from utils.helpers import get_text
+from utils.helpers import get_text, format_payment_method
 
 
 def get_main_keyboard(lang: str = 'am') -> InlineKeyboardMarkup:
@@ -119,6 +119,56 @@ def get_product_keyboard(product_id: int, category: str, index: int, total: int,
     return markup
 
 
+def get_browse_product_keyboard(
+    product_id: int,
+    category: str,
+    index: int,
+    total: int,
+    lang: str = 'am',
+) -> InlineKeyboardMarkup:
+    """Build the compact keyboard used by category product cards."""
+    markup = InlineKeyboardMarkup(row_width=2)
+    back_label, next_label = (
+        ("⬅️ ወደኋላ", "ቀጣይ ➡️") if lang == 'am' else ("⬅️ Back", "Next ➡️")
+    )
+    markup.row(
+        InlineKeyboardButton(
+            back_label,
+            callback_data=f"browse_cat:{category}:{index - 1}" if index > 0 else "browse_noop",
+        ),
+        InlineKeyboardButton(
+            next_label,
+            callback_data=f"browse_cat:{category}:{index + 1}" if index < total - 1 else "browse_noop",
+        ),
+    )
+    markup.row(
+        InlineKeyboardButton(
+            "🛒 ወደ ጋሪ ጨምር" if lang == 'am' else "🛒 Add to Cart",
+            callback_data=f"product_cart_{product_id}",
+        ),
+        InlineKeyboardButton(
+            "❤️ ተወዳጅ" if lang == 'am' else "❤️ Wishlist",
+            callback_data=f"product_wishlist_{product_id}",
+        ),
+    )
+    action_row = []
+    if config.bot.ADMIN_USERNAME:
+        action_row.append(
+            InlineKeyboardButton(
+                "💬 ቀጥታ ለመግዛት" if lang == 'am' else "💬 Buy Now",
+                url=f"https://t.me/{config.bot.ADMIN_USERNAME}",
+            )
+        )
+    action_row.append(
+        InlineKeyboardButton(
+            "🔙 ዋና ሜኑ" if lang == 'am' else "🔙 Main Menu",
+            callback_data="main_menu",
+        )
+    )
+    markup.row(*action_row)
+    return markup
+
+
 def get_rating_keyboard(product_id: int, lang: str = 'am') -> InlineKeyboardMarkup:
     """የደረጃ ምርጫ ኪቦርድ መፍጠር"""
     markup = InlineKeyboardMarkup(row_width=5)
@@ -156,38 +206,59 @@ def get_order_keyboard(order_id: int, status: str, lang: str = 'am') -> InlineKe
     """የትዕዛዝ ኪቦርድ መፍጠር"""
     markup = InlineKeyboardMarkup(row_width=2)
     
-    # የትዕዛዝ ዝርዝር
     markup.add(
         InlineKeyboardButton(
-            "📋 " + get_text(lang, 'view_details'),
+            "📋 ዝርዝር" if lang == 'am' else "📋 Details",
             callback_data=f"order_{order_id}"
         )
     )
-    
-    # ሁኔታ ላይ የተመሰረቱ አዝራሮች
-    if status == 'Pending':
-        markup.add(
-            InlineKeyboardButton(
-                "❌ " + get_text(lang, 'cancel_order'),
-                callback_data=f"order_cancel_{order_id}"
-            )
-        )
-    
-    if status in ['Shipped', 'Delivered']:
-        markup.add(
-            InlineKeyboardButton(
-                "✅ " + get_text(lang, 'confirm_receipt'),
-                callback_data=f"order_confirm_{order_id}"
-            )
-        )
+    if config.bot.ADMIN_USERNAME:
+        markup.add(InlineKeyboardButton(
+            "💬 አስተዳዳሪን ያግኙ" if lang == 'am' else "💬 Contact support",
+            url=f"https://t.me/{config.bot.ADMIN_USERNAME}",
+        ))
     
     markup.add(
         InlineKeyboardButton(
-            "🔙 " + get_text(lang, 'back'),
+            "🔙 ትዕዛዞቼ" if lang == 'am' else "🔙 My Orders",
             callback_data="back_to_orders"
         )
     )
     
+    return markup
+
+
+def get_admin_order_actions_keyboard(
+    order_id: int,
+    status: str = '',
+    lang: str = 'am',
+) -> InlineKeyboardMarkup:
+    markup = InlineKeyboardMarkup(row_width=2)
+    labels = (
+        (
+            ("✅ አረጋግጥ", "Processing"),
+            ("🚚 ተልኳል", "Shipped"),
+            ("✔️ ተጠናቋል", "Delivered"),
+            ("❌ ሰርዝ", "Cancelled"),
+        )
+        if lang == 'am'
+        else (
+            ("✅ Confirm", "Processing"),
+            ("🚚 Shipped", "Shipped"),
+            ("✔️ Completed", "Delivered"),
+            ("❌ Cancel", "Cancelled"),
+        )
+    )
+    for label, next_status in labels:
+        if next_status.lower() != (status or '').strip().lower():
+            markup.add(InlineKeyboardButton(
+                label,
+                callback_data=f"admin_order_status_{order_id}_{next_status}",
+            ))
+    markup.add(InlineKeyboardButton(
+        "🔙 ወደ ትዕዛዞች" if lang == 'am' else "🔙 Back to Orders",
+        callback_data="admin_back_to_orders",
+    ))
     return markup
 
 
@@ -197,30 +268,34 @@ def get_payment_keyboard(lang: str = 'am') -> InlineKeyboardMarkup:
     
     markup.add(
         InlineKeyboardButton(
-            "💳 " + get_text(lang, 'chapa'),
+            format_payment_method('chapa', lang),
             callback_data="pay_chapa"
         ),
         InlineKeyboardButton(
-            "📱 " + get_text(lang, 'telebirr'),
+            format_payment_method('telebirr', lang),
             callback_data="pay_telebirr"
         )
     )
     
     markup.add(
         InlineKeyboardButton(
-            "💰 " + get_text(lang, 'cash_on_delivery'),
+            format_payment_method('cash_on_delivery', lang),
             callback_data="pay_cash"
         ),
         InlineKeyboardButton(
-            "🏦 " + get_text(lang, 'bank_transfer'),
+            format_payment_method('bank_transfer', lang),
             callback_data="pay_bank"
         )
     )
     
     markup.add(
         InlineKeyboardButton(
-            "🔙 " + get_text(lang, 'back'),
-            callback_data="checkout"
+            "🔙 ወደ ጋሪ" if lang == 'am' else "🔙 Back to Cart",
+            callback_data="view_cart"
+        ),
+        InlineKeyboardButton(
+            "❌ ሰርዝ" if lang == 'am' else "❌ Cancel",
+            callback_data="checkout_cancel"
         )
     )
     
@@ -337,4 +412,18 @@ def get_social_keyboard(lang: str = 'am') -> InlineKeyboardMarkup:
         )
     )
     
+    return markup
+
+
+def get_contact_keyboard(lang: str = 'am') -> InlineKeyboardMarkup:
+    markup = InlineKeyboardMarkup(row_width=1)
+    if config.bot.ADMIN_USERNAME:
+        markup.add(InlineKeyboardButton(
+            "💬 አስተዳዳሪውን ያግኙ" if lang == 'am' else "💬 Chat with Admin",
+            url=f"https://t.me/{config.bot.ADMIN_USERNAME}",
+        ))
+    markup.add(InlineKeyboardButton(
+        "🔙 ዋና ሜኑ" if lang == 'am' else "🔙 Main Menu",
+        callback_data="main_menu",
+    ))
     return markup

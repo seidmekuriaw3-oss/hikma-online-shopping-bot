@@ -11,9 +11,10 @@ import uuid
 import hashlib
 import hmac
 import requests
+import psycopg2
 from datetime import datetime
 from typing import Optional, Dict, Any, List
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from database import Database
 from config import config
@@ -56,7 +57,7 @@ class PaymentService:
                     INSERT INTO payments (
                         order_id, user_id, amount, currency, method,
                         transaction_id, status, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                     RETURNING id
                 ''', (
                     payment_data['order_id'],
@@ -74,13 +75,15 @@ class PaymentService:
                 # የትዕዛዝ ክፍያ ሁኔታ ማዘመን
                 cursor.execute('''
                     UPDATE orders 
-                    SET payment_status = 'Pending', payment_id = ?
-                    WHERE id = ?
+                    SET payment_status = 'Pending', payment_id = %s
+                    WHERE id = %s
                 ''', (transaction_id, order_id))
             
             logger.info(f"አዲስ ክፍያ ተፈጥሯል: {transaction_id} - {amount} {currency}")
             return payment_data
             
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"ክፍያ መፍጠር አልተቻለም: {e}")
             return None
@@ -89,11 +92,13 @@ class PaymentService:
         """ክፍያ በID ማግኘት"""
         try:
             cursor = self.db.execute(
-                "SELECT * FROM payments WHERE id = ?",
+                "SELECT * FROM payments WHERE id = %s",
                 (payment_id,)
             )
             row = cursor.fetchone()
             return dict(row) if row else None
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"ክፍያ ማግኘት አልተቻለም: {e}")
             return None
@@ -102,11 +107,13 @@ class PaymentService:
         """ክፍያ በግብይት ቁጥር ማግኘት"""
         try:
             cursor = self.db.execute(
-                "SELECT * FROM payments WHERE transaction_id = ?",
+                "SELECT * FROM payments WHERE transaction_id = %s",
                 (transaction_id,)
             )
             row = cursor.fetchone()
             return dict(row) if row else None
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"ክፍያ ማግኘት አልተቻለም: {e}")
             return None
@@ -121,14 +128,14 @@ class PaymentService:
                 if provider_response:
                     cursor.execute('''
                         UPDATE payments 
-                        SET status = ?, provider_response = ?, updated_at = CURRENT_TIMESTAMP
-                        WHERE transaction_id = ?
+                        SET status = %s, provider_response = %s, updated_at = CURRENT_TIMESTAMP
+                        WHERE transaction_id = %s
                     ''', (status, json.dumps(provider_response), transaction_id))
                 else:
                     cursor.execute('''
                         UPDATE payments 
-                        SET status = ?, updated_at = CURRENT_TIMESTAMP
-                        WHERE transaction_id = ?
+                        SET status = %s, updated_at = CURRENT_TIMESTAMP
+                        WHERE transaction_id = %s
                     ''', (status, transaction_id))
                 
                 # ክፍያ ከተጠናቀቀ
@@ -136,14 +143,14 @@ class PaymentService:
                     cursor.execute('''
                         UPDATE payments 
                         SET completed_at = CURRENT_TIMESTAMP
-                        WHERE transaction_id = ?
+                        WHERE transaction_id = %s
                     ''', (transaction_id,))
                     
                     # የትዕዛዝ ክፍያ ሁኔታ ማዘመን
                     cursor.execute('''
                         UPDATE orders 
                         SET payment_status = 'Paid'
-                        WHERE payment_id = ?
+                        WHERE payment_id = %s
                     ''', (transaction_id,))
                 
                 # ክፍያ ከተሰረዘ
@@ -151,12 +158,14 @@ class PaymentService:
                     cursor.execute('''
                         UPDATE orders 
                         SET payment_status = 'Failed'
-                        WHERE payment_id = ?
+                        WHERE payment_id = %s
                     ''', (transaction_id,))
             
             logger.info(f"ክፍያ ሁኔታ ተዘምኗል: {transaction_id} -> {status}")
             return True
             
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"ክፍያ ሁኔታ ማዘመን አልተቻለም: {e}")
             return False
@@ -243,6 +252,8 @@ class PaymentService:
             logger.error(f"ቻፓ ክፍያ መጀመር አልተቻለም: {response.text}")
             return None
             
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"ቻፓ ክፍያ መጀመር አልተቻለም: {e}")
             return None
@@ -266,7 +277,13 @@ class PaymentService:
                 if data.get('status') == 'success':
                     payment_data = data.get('data', {})
                     
-                    amount_matches = str(payment_data.get('amount')) == str(payment['amount'])
+                    try:
+                        amount_matches = (
+                            Decimal(str(payment_data.get('amount')))
+                            == Decimal(str(payment['amount']))
+                        )
+                    except (InvalidOperation, TypeError, ValueError):
+                        amount_matches = False
                     currency_matches = payment_data.get('currency', payment['currency']) == payment['currency']
                     reference_matches = payment_data.get('tx_ref', payment['transaction_id']) == payment['transaction_id']
 
@@ -282,6 +299,8 @@ class PaymentService:
             logger.warning(f"ቻፓ ክፍያ ማረጋገጥ አልተቻለም: {response.text}")
             return None
             
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"ቻፓ ክፍያ ማረጋገጥ አልተቻለም: {e}")
             return None
@@ -333,6 +352,8 @@ class PaymentService:
             logger.error(f"ቴሌብር ክፍያ መጀመር አልተቻለም: {response.text}")
             return None
             
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"ቴሌብር ክፍያ መጀመር አልተቻለም: {e}")
             return None
@@ -367,6 +388,8 @@ class PaymentService:
             logger.warning(f"ቴሌብር ክፍያ ማረጋገጥ አልተቻለም: {response.text}")
             return None
             
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"ቴሌብር ክፍያ ማረጋገጥ አልተቻለም: {e}")
             return None
@@ -411,12 +434,14 @@ class PaymentService:
                 cursor.execute('''
                     UPDATE payments 
                     SET provider_response = COALESCE(provider_response, '{}'::jsonb)
-                        || jsonb_build_object('receipt_file_id', ?)
-                    WHERE id = ?
+                        || jsonb_build_object('receipt_file_id', %s)
+                    WHERE id = %s
                 ''', (receipt_file_id, payment_id))
             
             return self.get_payment(payment_id)
             
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"የክፍያ ደረሰኝ ማዘመን አልተቻለም: {e}")
             return None
@@ -426,13 +451,15 @@ class PaymentService:
         try:
             cursor = self.db.execute('''
                 SELECT * FROM payments 
-                WHERE user_id = ?
+                WHERE user_id = %s
                 ORDER BY created_at DESC
-                LIMIT ?
+                LIMIT %s
             ''', (user_id, limit))
             
             return [dict(row) for row in cursor.fetchall()]
             
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"የተጠቃሚ ክፍያዎች ማግኘት አልተቻለም: {e}")
             return []
@@ -460,6 +487,8 @@ class PaymentService:
                 'failed_payments': row[4] or 0
             }
             
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"የክፍያ ስታቲስቲክስ ማግኘት አልተቻለም: {e}")
             return {
@@ -510,6 +539,8 @@ def handle_chapa_webhook(request_data: Dict, payment_service: PaymentService) ->
         logger.info(f"ቻፓ ዌብሁክ: {transaction_id} -> {status}")
         return {'status': 'success'}, 200
         
+    except psycopg2.Error:
+        raise
     except Exception as e:
         logger.error(f"ቻፓ ዌብሁክ ስህተት: {e}")
         return {'status': 'error', 'message': str(e)}, 500

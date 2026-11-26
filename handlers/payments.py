@@ -16,7 +16,9 @@ from telebot import TeleBot
 from telebot.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from database import Database
-from utils.helpers import get_text, get_user_lang, format_currency, generate_order_number
+from utils.helpers import (
+    get_text, get_user_lang, format_currency, format_payment_method, generate_order_number,
+)
 from services.payments import PaymentService
 from services.notifications import notify_admins, send_order_confirmation
 from config import config
@@ -56,13 +58,13 @@ def register(bot: TeleBot, db: Database):
     
     # ==================== የክፍያ ምርጫ ====================
     
-    @bot.callback_query_handler(func=lambda call: call.data.startswith('pay_'))
+    @bot.callback_query_handler(func=lambda call: call.data.startswith('payment_provider_'))
     def handle_payment_method(call: CallbackQuery):
         """የክፍያ ዘዴ ምርጫ አያያዝ"""
         user_id = call.from_user.id
         lang = get_user_lang(db, user_id)
         
-        method = call.data.replace('pay_', '')
+        method = call.data.replace('payment_provider_', '')
         
         # የትዕዛዝ መረጃ ማግኘት
         order_data = get_order_data(user_id)
@@ -144,7 +146,7 @@ def register(bot: TeleBot, db: Database):
         )
         
         msg = f"💳 *{get_text(lang, 'chapa_payment')}*\n\n"
-        msg += f"💰 {get_text(lang, 'amount')}: {format_currency(payment['amount'])} ETB\n"
+        msg += f"💰 {get_text(lang, 'amount')}: {format_currency(payment['amount'])}\n"
         msg += f"🔢 {get_text(lang, 'transaction_id')}: {payment['transaction_id']}\n\n"
         msg += f"📌 {get_text(lang, 'click_to_pay')}\n"
         msg += f"🔗 {get_text(lang, 'payment_link')}: {result.get('checkout_url')}"
@@ -161,7 +163,7 @@ def register(bot: TeleBot, db: Database):
             bot,
             f"💳 *{get_text(lang, 'new_payment')}*\n\n"
             f"👤 {get_text(lang, 'user')}: {message.from_user.first_name}\n"
-            f"💰 {get_text(lang, 'amount')}: {format_currency(payment['amount'])} ETB\n"
+            f"💰 {get_text(lang, 'amount')}: {format_currency(payment['amount'])}\n"
             f"🔢 {get_text(lang, 'transaction_id')}: {payment['transaction_id']}\n"
             f"💳 {get_text(lang, 'method')}: Chapa"
         )
@@ -201,7 +203,7 @@ def register(bot: TeleBot, db: Database):
         )
         
         msg = f"📱 *{get_text(lang, 'telebirr_payment')}*\n\n"
-        msg += f"💰 {get_text(lang, 'amount')}: {format_currency(payment['amount'])} ETB\n"
+        msg += f"💰 {get_text(lang, 'amount')}: {format_currency(payment['amount'])}\n"
         msg += f"🔢 {get_text(lang, 'transaction_id')}: {payment['transaction_id']}\n\n"
         msg += f"📌 {get_text(lang, 'telebirr_instructions')}\n"
         msg += f"🔗 {get_text(lang, 'payment_link')}: {result.get('payment_url')}"
@@ -218,7 +220,7 @@ def register(bot: TeleBot, db: Database):
             bot,
             f"📱 *{get_text(lang, 'new_payment')}*\n\n"
             f"👤 {get_text(lang, 'user')}: {message.from_user.first_name}\n"
-            f"💰 {get_text(lang, 'amount')}: {format_currency(payment['amount'])} ETB\n"
+            f"💰 {get_text(lang, 'amount')}: {format_currency(payment['amount'])}\n"
             f"🔢 {get_text(lang, 'transaction_id')}: {payment['transaction_id']}\n"
             f"📱 {get_text(lang, 'method')}: Telebirr"
         )
@@ -239,9 +241,9 @@ def register(bot: TeleBot, db: Database):
             db.update_order_status(order_id, 'Processing')
         
         # ክፍያ ማሳወቅ
-        msg = f"💰 *{get_text(lang, 'cash_payment')}*\n\n"
+        msg = f"{format_payment_method('cash_on_delivery', lang)}\n\n"
         msg += f"✅ {get_text(lang, 'payment_confirmed')}\n"
-        msg += f"💰 {get_text(lang, 'amount')}: {format_currency(payment['amount'])} ETB\n"
+        msg += f"💰 {get_text(lang, 'amount')}: {format_currency(payment['amount'])}\n"
         msg += f"🔢 {get_text(lang, 'transaction_id')}: {payment['transaction_id']}\n\n"
         msg += f"📦 {get_text(lang, 'order_confirmed')}\n"
         msg += f"📌 {get_text(lang, 'cash_on_delivery_note')}"
@@ -273,7 +275,7 @@ def register(bot: TeleBot, db: Database):
             bot,
             f"💰 *{get_text(lang, 'new_payment')}*\n\n"
             f"👤 {get_text(lang, 'user')}: {message.from_user.first_name}\n"
-            f"💰 {get_text(lang, 'amount')}: {format_currency(payment['amount'])} ETB\n"
+            f"💰 {get_text(lang, 'amount')}: {format_currency(payment['amount'])}\n"
             f"🔢 {get_text(lang, 'transaction_id')}: {payment['transaction_id']}\n"
             f"💰 {get_text(lang, 'method')}: Cash on Delivery"
         )
@@ -300,8 +302,8 @@ def register(bot: TeleBot, db: Database):
             )
         )
         
-        msg = f"🏦 *{get_text(lang, 'bank_transfer')}*\n\n"
-        msg += f"💰 {get_text(lang, 'amount')}: {format_currency(payment['amount'])} ETB\n"
+        msg = f"{format_payment_method('bank_transfer', lang)}\n\n"
+        msg += f"💰 {get_text(lang, 'amount')}: {format_currency(payment['amount'])}\n"
         msg += f"🔢 {get_text(lang, 'transaction_id')}: {payment['transaction_id']}\n\n"
         msg += f"*{get_text(lang, 'bank_details')}:*\n"
         msg += bank_info + "\n\n"
@@ -320,7 +322,7 @@ def register(bot: TeleBot, db: Database):
             bot,
             f"🏦 *{get_text(lang, 'new_payment')}*\n\n"
             f"👤 {get_text(lang, 'user')}: {message.from_user.first_name}\n"
-            f"💰 {get_text(lang, 'amount')}: {format_currency(payment['amount'])} ETB\n"
+            f"💰 {get_text(lang, 'amount')}: {format_currency(payment['amount'])}\n"
             f"🔢 {get_text(lang, 'transaction_id')}: {payment['transaction_id']}\n"
             f"🏦 {get_text(lang, 'method')}: Bank Transfer"
         )
@@ -374,7 +376,7 @@ def register(bot: TeleBot, db: Database):
                 pass
             
             msg = f"✅ *{get_text(lang, 'payment_successful')}*\n\n"
-            msg += f"💰 {get_text(lang, 'amount')}: {format_currency(payment['amount'])} ETB\n"
+            msg += f"💰 {get_text(lang, 'amount')}: {format_currency(payment['amount'])}\n"
             msg += f"🔢 {get_text(lang, 'transaction_id')}: {payment['transaction_id']}\n\n"
             msg += f"📦 {get_text(lang, 'order_confirmed')}\n"
             msg += f"📌 {get_text(lang, 'we_will_notify_you')}"
@@ -498,7 +500,7 @@ def register(bot: TeleBot, db: Database):
                 f"📸 *{get_text(lang, 'new_receipt_uploaded')}*\n\n"
                 f"👤 {get_text(lang, 'user')}: {message.from_user.first_name}\n"
                 f"🔢 {get_text(lang, 'payment_id')}: {payment_id}\n"
-                f"💰 {get_text(lang, 'amount')}: {format_currency(payment['amount'])} ETB"
+                f"💰 {get_text(lang, 'amount')}: {format_currency(payment['amount'])}"
             )
         else:
             bot.send_message(

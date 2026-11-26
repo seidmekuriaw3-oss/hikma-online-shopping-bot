@@ -5,14 +5,16 @@ Hikma Online Shopping Bot - የውሂብ ጎታ ሞጁል
 ይህ ፋይል ሁሉንም የውሂብ ጎታ ግንኙነቶችን እና ስራዎችን ይይዛል
 """
 
-import re
 import json
-import time
-from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any, Tuple, Union
+from datetime import datetime
+from decimal import Decimal
+from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
-import threading
 import logging
+
+import psycopg2
+from psycopg2 import pool, sql
+from psycopg2.extras import DictCursor
 
 from config import config
 from utils.logger import get_logger
@@ -22,43 +24,77 @@ logger = get_logger('database')
 
 def _decode_json(value):
     if isinstance(value, str):
-        return json.loads(value)
+        return json.loads(value, parse_float=Decimal)
     return value
 
 
+def _json_default(value):
+    if isinstance(value, Decimal):
+        return float(value)
+    raise TypeError(f'Object of type {type(value).__name__} is not JSON serializable')
+
+
 class _CursorProxy:
-    def __init__(self, cursor, database):
+    def __init__(self, cursor):
         self._cursor = cursor
-        self._database = database
 
     def execute(self, query, params=()):
-        query, params = self._database.prepare_query(query, params)
         self._cursor.execute(query, params)
         return self
 
     def executemany(self, query, params):
-        query, _ = self._database.prepare_query(query, ())
         self._cursor.executemany(query, params)
         return self
+
+    def close(self):
+        self._cursor.close()
 
     def __getattr__(self, name):
         return getattr(self._cursor, name)
 
 
 class _ConnectionProxy:
-    def __init__(self, connection, database):
+    def __init__(self, connection):
         self._connection = connection
-        self._database = database
+        self._cursors = []
 
     def cursor(self):
-        return _CursorProxy(self._connection.cursor(), self._database)
+        cursor = _CursorProxy(self._connection.cursor())
+        self._cursors.append(cursor)
+        return cursor
 
     def execute(self, query, params=()):
         cursor = self.cursor()
         return cursor.execute(query, params)
 
+    def close_cursors(self):
+        for cursor in self._cursors:
+            cursor.close()
+        self._cursors.clear()
+
     def __getattr__(self, name):
         return getattr(self._connection, name)
+
+
+class _CursorResult:
+    """Buffered query result safe to consume after returning a pooled connection."""
+
+    def __init__(self, rows=(), rowcount=0):
+        self._rows = tuple(rows)
+        self._position = 0
+        self.rowcount = rowcount
+
+    def fetchone(self):
+        if self._position >= len(self._rows):
+            return None
+        row = self._rows[self._position]
+        self._position += 1
+        return row
+
+    def fetchall(self):
+        rows = self._rows[self._position:]
+        self._position = len(self._rows)
+        return list(rows)
 
 
 class Database:
@@ -68,102 +104,62 @@ class Database:
         self.db_url = config.database.DB_URL
         if not self.db_url.startswith(('postgresql://', 'postgres://')):
             raise ValueError('DATABASE_URL must be a PostgreSQL connection URL')
-        self._local = threading.local()
-        self._lock = threading.RLock()
-
-        # የውሂብ ጎታ ሰንጠረዦችን መፍጠር
-        self.init_database()
+        self._pool = pool.ThreadedConnectionPool(
+            minconn=1,
+            maxconn=config.database.DB_POOL_SIZE,
+            dsn=self.db_url,
+            connect_timeout=config.database.DB_TIMEOUT,
+            cursor_factory=DictCursor,
+        )
+        try:
+            self.init_database()
+        except Exception:
+            self._pool.closeall()
+            raise
         logger.info("✅ PostgreSQL የውሂብ ጎታ ተዘጋጅቷል")
     
     @contextmanager
     def get_connection(self):
-        """የውሂብ ጎታ ግንኙነት መፍጠር"""
-        conn = getattr(self._local, 'connection', None)
-        if conn is None:
-            try:
-                import psycopg2
-                from psycopg2.extras import DictCursor
-            except ImportError as error:
-                raise RuntimeError('psycopg2-binary is required for PostgreSQL') from error
-            conn = psycopg2.connect(
-                self.db_url,
-                connect_timeout=config.database.DB_TIMEOUT,
-                cursor_factory=DictCursor
-            )
-            self._local.connection = conn
-        
+        """Borrow a pooled connection and return it after committing or rolling back."""
         try:
-            yield _ConnectionProxy(conn, self)
+            conn = self._pool.getconn()
+        except psycopg2.Error:
+            logger.exception("Could not acquire a PostgreSQL connection")
+            raise
+        connection = _ConnectionProxy(conn)
+        discard_connection = False
+        try:
+            yield connection
             conn.commit()
-        except Exception as e:
-            conn.rollback()
-            logger.error(f"❌ የውሂብ ጎታ ስህተት: {e}")
+        except BaseException as error:
+            try:
+                conn.rollback()
+            except psycopg2.Error:
+                discard_connection = True
+            if isinstance(error, (psycopg2.OperationalError, psycopg2.InterfaceError)):
+                discard_connection = True
+            logger.exception("PostgreSQL transaction failed")
             raise
         finally:
-            # Keep the thread-local connection alive because execute() returns
-            # cursors that callers consume after this context exits.
-            pass
-
-    def prepare_query(self, query: str, params: tuple = ()):
-        """Translate legacy query placeholders and schema syntax to PostgreSQL."""
-        query = query.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY")
-        query = query.replace(" JSON", " JSONB")
-        query = re.sub(r'\b(user_id|referred_by|admin_id) INTEGER\b', r'\1 BIGINT', query)
-        query = query.replace("datetime('now', ?)", "CURRENT_TIMESTAMP + %s::interval")
-        query = re.sub(
-            r'GROUP_CONCAT\(([^)]+)\)',
-            r"STRING_AGG(\1::text, ',')",
-            query,
-            flags=re.IGNORECASE,
-        )
-        query = query.replace(
-            "INSERT OR REPLACE INTO users",
-            "INSERT INTO users"
-        )
-        if query.lstrip().startswith("INSERT INTO users"):
-            query = query.rstrip() + (
-                " ON CONFLICT (user_id) DO UPDATE SET "
-                "username = EXCLUDED.username, first_name = EXCLUDED.first_name, "
-                "last_name = EXCLUDED.last_name, phone = EXCLUDED.phone, "
-                "email = EXCLUDED.email, lang = EXCLUDED.lang, "
-                "referral_code = EXCLUDED.referral_code"
-            )
-        query = query.replace(
-            "INSERT OR REPLACE INTO carts",
-            "INSERT INTO carts"
-        )
-        if query.lstrip().startswith("INSERT INTO carts"):
-            query = query.rstrip() + (
-                " ON CONFLICT (user_id) DO UPDATE SET items = EXCLUDED.items, "
-                "total_amount = EXCLUDED.total_amount, discount_amount = EXCLUDED.discount_amount, "
-                "final_amount = EXCLUDED.final_amount, discount_code = EXCLUDED.discount_code"
-            )
-        query = query.replace(
-            "INSERT OR REPLACE INTO reviews",
-            "INSERT INTO reviews"
-        )
-        if query.lstrip().startswith("INSERT INTO reviews"):
-            query = query.rstrip() + (
-                " ON CONFLICT (user_id, product_id) DO UPDATE SET "
-                "rating = EXCLUDED.rating, comment = EXCLUDED.comment, "
-                "images = EXCLUDED.images"
-            )
-        query = query.replace('?', '%s')
-        return query, params
+            try:
+                connection.close_cursors()
+            finally:
+                self._pool.putconn(conn, close=discard_connection or bool(conn.closed))
     
     def execute(self, query: str, params: tuple = ()):
-        """የSQL ጥያቄ መፈጸም"""
+        """Execute PostgreSQL SQL and buffer rows before returning the pooled connection."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(query, params)
-            return cursor
+            rows = cursor.fetchall() if cursor.description else ()
+            return _CursorResult(rows, cursor.rowcount)
     
     def executemany(self, query: str, params: List[tuple]):
         """ብዙ SQL ጥያቄዎችን መፈጸም"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.executemany(query, params)
-            return cursor
+            return _CursorResult(rowcount=cursor.rowcount)
     
     # ==================== መጀመሪያ ማዋቀር ====================
     
@@ -175,7 +171,7 @@ class Database:
             # 1. ተጠቃሚዎች
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS users (
-                    user_id INTEGER PRIMARY KEY,
+                    user_id BIGINT PRIMARY KEY,
                     username TEXT,
                     first_name TEXT,
                     last_name TEXT,
@@ -190,8 +186,8 @@ class Database:
                     last_login TIMESTAMP,
                     login_count INTEGER DEFAULT 0,
                     referral_code TEXT UNIQUE,
-                    referred_by INTEGER,
-                    balance REAL DEFAULT 0,
+                    referred_by BIGINT,
+                    balance NUMERIC(12,2) DEFAULT 0,
                     FOREIGN KEY (referred_by) REFERENCES users(user_id)
                 )
             ''')
@@ -199,27 +195,27 @@ class Database:
             # 2. ምርቶች
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS products (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id SERIAL PRIMARY KEY,
                     name_am TEXT NOT NULL,
                     name_en TEXT NOT NULL,
                     description_am TEXT,
                     description_en TEXT,
-                    price REAL NOT NULL,
-                    compare_price REAL,
+                    price NUMERIC(12,2) NOT NULL,
+                    compare_price NUMERIC(12,2),
                     size TEXT,
                     category TEXT NOT NULL,
                     subcategory TEXT,
                     image_id TEXT NOT NULL,
-                    images JSON,
+                    images JSONB,
                     status TEXT DEFAULT 'In Stock',
                     stock_quantity INTEGER DEFAULT 0,
                     sold_count INTEGER DEFAULT 0,
                     views_count INTEGER DEFAULT 0,
-                    rating_avg REAL DEFAULT 0,
+                    rating_avg NUMERIC(4,2) DEFAULT 0,
                     rating_count INTEGER DEFAULT 0,
                     is_featured INTEGER DEFAULT 0,
                     is_on_sale INTEGER DEFAULT 0,
-                    discount_percent REAL DEFAULT 0,
+                    discount_percent NUMERIC(5,2) DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -228,15 +224,15 @@ class Database:
             # 3. ትዕዛዞች
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS orders (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id SERIAL PRIMARY KEY,
                     order_number TEXT UNIQUE NOT NULL,
-                    user_id INTEGER,
-                    total_amount REAL NOT NULL,
-                    subtotal_amount REAL NOT NULL,
-                    discount_amount REAL DEFAULT 0,
-                    shipping_amount REAL DEFAULT 0,
-                    tax_amount REAL DEFAULT 0,
-                    final_amount REAL NOT NULL,
+                    user_id BIGINT,
+                    total_amount NUMERIC(12,2) NOT NULL,
+                    subtotal_amount NUMERIC(12,2) NOT NULL,
+                    discount_amount NUMERIC(12,2) DEFAULT 0,
+                    shipping_amount NUMERIC(12,2) DEFAULT 0,
+                    tax_amount NUMERIC(12,2) DEFAULT 0,
+                    final_amount NUMERIC(12,2) NOT NULL,
                     status TEXT DEFAULT 'Pending',
                     payment_method TEXT,
                     payment_status TEXT DEFAULT 'Unpaid',
@@ -257,14 +253,14 @@ class Database:
             # 4. የትዕዛዝ ዝርዝሮች
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS order_items (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id SERIAL PRIMARY KEY,
                     order_id INTEGER,
                     product_id INTEGER,
                     quantity INTEGER NOT NULL,
-                    price_at_time REAL NOT NULL,
+                    price_at_time NUMERIC(12,2) NOT NULL,
                     size_at_time TEXT,
-                    total_price REAL NOT NULL,
-                    discount_at_time REAL DEFAULT 0,
+                    total_price NUMERIC(12,2) NOT NULL,
+                    discount_at_time NUMERIC(5,2) DEFAULT 0,
                     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
                     FOREIGN KEY (product_id) REFERENCES products(id)
                 )
@@ -273,12 +269,12 @@ class Database:
             # 5. ግምገማዎች
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS reviews (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER,
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT,
                     product_id INTEGER,
                     rating INTEGER CHECK (rating >= 1 AND rating <= 5),
                     comment TEXT,
-                    images JSON,
+                    images JSONB,
                     is_verified INTEGER DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -291,13 +287,13 @@ class Database:
             # 6. ቅናሾች
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS discounts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id SERIAL PRIMARY KEY,
                     code TEXT UNIQUE NOT NULL,
-                    discount_percent REAL NOT NULL,
+                    discount_percent NUMERIC(5,2) NOT NULL,
                     description TEXT,
                     discount_type TEXT DEFAULT 'percent',
-                    min_order_amount REAL DEFAULT 0,
-                    max_discount_amount REAL,
+                    min_order_amount NUMERIC(12,2) DEFAULT 0,
+                    max_discount_amount NUMERIC(12,2),
                     valid_from TIMESTAMP,
                     valid_to TIMESTAMP,
                     usage_limit INTEGER DEFAULT 0,
@@ -312,9 +308,9 @@ class Database:
             # 7. የቅናሽ አጠቃቀም
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS discount_usage (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id SERIAL PRIMARY KEY,
                     discount_id INTEGER,
-                    user_id INTEGER,
+                    user_id BIGINT,
                     order_id INTEGER,
                     used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (discount_id) REFERENCES discounts(id),
@@ -326,12 +322,12 @@ class Database:
             # 8. ጋሪ
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS carts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER UNIQUE,
-                    items JSON,
-                    total_amount REAL DEFAULT 0,
-                    discount_amount REAL DEFAULT 0,
-                    final_amount REAL DEFAULT 0,
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT UNIQUE,
+                    items JSONB,
+                    total_amount NUMERIC(12,2) DEFAULT 0,
+                    discount_amount NUMERIC(12,2) DEFAULT 0,
+                    final_amount NUMERIC(12,2) DEFAULT 0,
                     discount_code TEXT,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (user_id) REFERENCES users(user_id)
@@ -341,7 +337,7 @@ class Database:
             # 9. ማስታወቂያዎች
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS notifications (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id SERIAL PRIMARY KEY,
                     title_am TEXT,
                     title_en TEXT,
                     message_am TEXT,
@@ -361,8 +357,8 @@ class Database:
             # 10. የእንቅስቃሴ ሎግ
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS activity_logs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER,
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT,
                     action TEXT NOT NULL,
                     details TEXT,
                     ip_address TEXT,
@@ -375,15 +371,15 @@ class Database:
             # 11. ክፍያዎች
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS payments (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id SERIAL PRIMARY KEY,
                     order_id INTEGER,
-                    user_id INTEGER,
-                    amount REAL NOT NULL,
+                    user_id BIGINT,
+                    amount NUMERIC(12,2) NOT NULL,
                     currency TEXT DEFAULT 'ETB',
                     method TEXT NOT NULL,
                     transaction_id TEXT UNIQUE,
                     status TEXT DEFAULT 'Pending',
-                    provider_response JSON,
+                    provider_response JSONB,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     completed_at TIMESTAMP,
@@ -395,9 +391,9 @@ class Database:
             # 12. የምርት ጉብኝቶች
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS product_views (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id SERIAL PRIMARY KEY,
                     product_id INTEGER,
-                    user_id INTEGER,
+                    user_id BIGINT,
                     ip_address TEXT,
                     viewed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (product_id) REFERENCES products(id),
@@ -408,8 +404,8 @@ class Database:
             # 13. የተመረጡ ምርቶች
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS wishlists (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER,
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT,
                     product_id INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (user_id) REFERENCES users(user_id),
@@ -421,8 +417,8 @@ class Database:
             # 14. የአስተዳዳሪ ማስታወሻዎች
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS admin_notes (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    admin_id INTEGER,
+                    id SERIAL PRIMARY KEY,
+                    admin_id BIGINT,
                     note_type TEXT,
                     reference_id INTEGER,
                     content TEXT,
@@ -434,13 +430,13 @@ class Database:
             # 15. የስርዓት ምትኬዎች
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS backups (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id SERIAL PRIMARY KEY,
                     filename TEXT NOT NULL,
                     size INTEGER,
                     backup_type TEXT DEFAULT 'full',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     restored_at TIMESTAMP,
-                    restored_by INTEGER
+                    restored_by BIGINT
                 )
             ''')
             
@@ -468,12 +464,29 @@ class Database:
             for index in indexes:
                 cursor.execute(index)
 
-            self._migrate_postgres_ids(cursor)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS schema_migrations (
+                    version INTEGER PRIMARY KEY,
+                    applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            self._migrate_postgres_schema(cursor)
             
             logger.info("✅ ሁሉም የውሂብ ጎታ ሰንጠረዦች ተፈጥረዋል")
 
-    def _migrate_postgres_ids(self, cursor):
-        """Use BIGINT for Telegram IDs and preserve their foreign keys."""
+    def _migrate_postgres_schema(self, cursor):
+        """Apply one-time PostgreSQL type migrations for existing installations."""
+        cursor.execute("SELECT version FROM schema_migrations WHERE version = %s", (1,))
+        if cursor.fetchone():
+            cursor.execute("SELECT version FROM schema_migrations WHERE version = %s", (2,))
+            if not cursor.fetchone():
+                cursor.execute("ALTER TABLE payments ALTER COLUMN status SET DEFAULT 'pending'")
+                cursor.execute(
+                    "INSERT INTO schema_migrations (version) VALUES (%s)",
+                    (2,),
+                )
+            return
+
         constraints = (
             ('users', 'users_referred_by_fkey'),
             ('orders', 'orders_user_id_fkey'),
@@ -497,7 +510,10 @@ class Database:
             ('product_views', 'user_id'), ('wishlists', 'user_id'),
             ('admin_notes', 'admin_id'),
         ):
-            cursor.execute(f'ALTER TABLE {table} ALTER COLUMN {column} TYPE BIGINT')
+            cursor.execute(
+                f'ALTER TABLE {table} ALTER COLUMN {column} TYPE BIGINT '
+                f'USING {column}::BIGINT'
+            )
 
         for statement in (
             'ALTER TABLE users ADD CONSTRAINT users_referred_by_fkey FOREIGN KEY (referred_by) REFERENCES users(user_id)',
@@ -512,6 +528,47 @@ class Database:
             'ALTER TABLE admin_notes ADD CONSTRAINT admin_notes_admin_id_fkey FOREIGN KEY (admin_id) REFERENCES users(user_id)',
         ):
             cursor.execute(statement)
+
+        for table, columns in (
+            ('users', {'balance': 'NUMERIC(12,2)'}),
+            ('products', {
+                'price': 'NUMERIC(12,2)', 'compare_price': 'NUMERIC(12,2)',
+                'rating_avg': 'NUMERIC(4,2)', 'discount_percent': 'NUMERIC(5,2)',
+            }),
+            ('orders', {
+                'total_amount': 'NUMERIC(12,2)', 'subtotal_amount': 'NUMERIC(12,2)',
+                'discount_amount': 'NUMERIC(12,2)', 'shipping_amount': 'NUMERIC(12,2)',
+                'tax_amount': 'NUMERIC(12,2)', 'final_amount': 'NUMERIC(12,2)',
+            }),
+            ('order_items', {
+                'price_at_time': 'NUMERIC(12,2)', 'total_price': 'NUMERIC(12,2)',
+                'discount_at_time': 'NUMERIC(5,2)',
+            }),
+            ('discounts', {
+                'discount_percent': 'NUMERIC(5,2)', 'min_order_amount': 'NUMERIC(12,2)',
+                'max_discount_amount': 'NUMERIC(12,2)',
+            }),
+            ('carts', {
+                'total_amount': 'NUMERIC(12,2)', 'discount_amount': 'NUMERIC(12,2)',
+                'final_amount': 'NUMERIC(12,2)',
+            }),
+            ('payments', {'amount': 'NUMERIC(12,2)'}),
+        ):
+            for column, data_type in columns.items():
+                cursor.execute(
+                    f'ALTER TABLE {table} ALTER COLUMN {column} TYPE {data_type} '
+                    f'USING {column}::{data_type}'
+                )
+
+        cursor.execute(
+            "INSERT INTO schema_migrations (version) VALUES (%s)",
+            (1,),
+        )
+        cursor.execute("ALTER TABLE payments ALTER COLUMN status SET DEFAULT 'pending'")
+        cursor.execute(
+            "INSERT INTO schema_migrations (version) VALUES (%s)",
+            (2,),
+        )
     
     # ==================== ማጣቀሻ ሰንጠረዦች ====================
     
@@ -524,7 +581,7 @@ class Database:
         """የሰንጠረዥ መረጃ ማግኘት"""
         cursor = self.execute(
             "SELECT column_name AS name, ordinal_position AS cid, data_type AS type "
-            "FROM information_schema.columns WHERE table_schema = 'public' AND table_name = ? "
+            "FROM information_schema.columns WHERE table_schema = 'public' AND table_name = %s "
             "ORDER BY ordinal_position",
             (table_name,)
         )
@@ -532,18 +589,19 @@ class Database:
     
     def get_table_size(self, table_name: str) -> int:
         """የሰንጠረዥ መጠን (ረድፎች) ማግኘት"""
-        cursor = self.execute(f"SELECT COUNT(*) FROM {table_name}")
+        if table_name not in self.get_table_names():
+            raise ValueError(f'Unknown PostgreSQL table: {table_name}')
+        cursor = self.execute(
+            sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(table_name))
+        )
         return cursor.fetchone()[0]
     
     # ==================== የውሂብ ጎታ መጠን ====================
     
     def get_db_size(self) -> int:
         """የውሂብ ጎታ መጠን በባይት ማግኘት"""
-        try:
-            cursor = self.execute("SELECT pg_database_size(current_database())")
-            return cursor.fetchone()[0]
-        except:
-            return 0
+        cursor = self.execute("SELECT pg_database_size(current_database())")
+        return cursor.fetchone()[0]
     
     def get_db_stats(self) -> Dict[str, Any]:
         """አጠቃላይ የውሂብ ጎታ ስታቲስቲክስ"""
@@ -564,16 +622,22 @@ class Database:
     
     def vacuum(self):
         """የውሂብ ጎታ መጠን መቀነስ (VACUUM)"""
-        with self.get_connection() as conn:
-            conn.execute("VACUUM")
+        conn = self._pool.getconn()
+        try:
+            conn.autocommit = True
+            with conn.cursor() as cursor:
+                cursor.execute("VACUUM")
+        finally:
+            try:
+                if not conn.closed:
+                    conn.autocommit = False
+            finally:
+                self._pool.putconn(conn, close=bool(conn.closed))
         logger.info("✅ የውሂብ ጎታ VACUUM ተከናውኗል")
     
     def close(self):
         """የውሂብ ጎታ ግንኙነቶችን መዝጋት"""
-        conn = getattr(self._local, 'connection', None)
-        if conn is not None:
-            conn.close()
-            self._local.connection = None
+        self._pool.closeall()
 
 
 # ለወደፊት መጠቀሚያ: የውሂብ ጎታ ክፍል ተጨማሪ ተግባራት
@@ -594,16 +658,26 @@ class DatabaseMixin:
         try:
             # የማጣቀሻ ኮድ መፍጠር
             if not referral_code:
-                referral_code = f"ZEN{user_id}{datetime.now().strftime('%m%d')}"
+                referral_code = f"HIK{user_id}{datetime.now().strftime('%m%d')}"
             
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
-                    INSERT OR REPLACE INTO users 
+                    INSERT INTO users
                     (user_id, username, first_name, last_name, phone, email, lang, referral_code)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (user_id) DO UPDATE SET
+                        username = EXCLUDED.username,
+                        first_name = EXCLUDED.first_name,
+                        last_name = EXCLUDED.last_name,
+                        phone = EXCLUDED.phone,
+                        email = EXCLUDED.email,
+                        lang = EXCLUDED.lang,
+                        referral_code = EXCLUDED.referral_code
                 ''', (user_id, username, first_name, last_name, phone, email, lang, referral_code))
                 return True
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ ተጠቃሚ መፍጠር አልተቻለም: {e}")
             return False
@@ -612,11 +686,13 @@ class DatabaseMixin:
         """ተጠቃሚ በID ማግኘት"""
         try:
             cursor = self.execute(
-                "SELECT * FROM users WHERE user_id = ?",
+                "SELECT * FROM users WHERE user_id = %s",
                 (user_id,)
             )
             row = cursor.fetchone()
             return dict(row) if row else None
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ ተጠቃሚ ማግኘት አልተቻለም: {e}")
             return None
@@ -625,11 +701,13 @@ class DatabaseMixin:
         """ተጠቃሚ በዩዘርኔም ማግኘት"""
         try:
             cursor = self.execute(
-                "SELECT * FROM users WHERE username = ?",
+                "SELECT * FROM users WHERE username = %s",
                 (username,)
             )
             row = cursor.fetchone()
             return dict(row) if row else None
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ ተጠቃሚ ማግኘት አልተቻለም: {e}")
             return None
@@ -638,11 +716,13 @@ class DatabaseMixin:
         """ተጠቃሚ በማጣቀሻ ኮድ ማግኘት"""
         try:
             cursor = self.execute(
-                "SELECT * FROM users WHERE referral_code = ?",
+                "SELECT * FROM users WHERE referral_code = %s",
                 (referral_code,)
             )
             row = cursor.fetchone()
             return dict(row) if row else None
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ ተጠቃሚ ማግኘት አልተቻለም: {e}")
             return None
@@ -657,18 +737,20 @@ class DatabaseMixin:
         
         for key, value in kwargs.items():
             if key in allowed_fields:
-                fields.append(f"{key} = ?")
+                fields.append(f"{key} = %s")
                 values.append(value)
         
         if not fields:
             return False
         
         values.append(user_id)
-        query = f"UPDATE users SET {', '.join(fields)}, last_active = CURRENT_TIMESTAMP WHERE user_id = ?"
+        query = f"UPDATE users SET {', '.join(fields)}, last_active = CURRENT_TIMESTAMP WHERE user_id = %s"
         
         try:
             self.execute(query, tuple(values))
             return True
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ ተጠቃሚ ማዘመን አልተቻለም: {e}")
             return False
@@ -677,10 +759,12 @@ class DatabaseMixin:
         """ሁሉንም ተጠቃሚዎች ማግኘት"""
         try:
             cursor = self.execute(
-                "SELECT * FROM users ORDER BY registered_at DESC LIMIT ? OFFSET ?",
+                "SELECT * FROM users ORDER BY registered_at DESC LIMIT %s OFFSET %s",
                 (limit, offset)
             )
             return [dict(row) for row in cursor.fetchall()]
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ ተጠቃሚዎችን ማግኘት አልተቻለም: {e}")
             return []
@@ -690,6 +774,8 @@ class DatabaseMixin:
         try:
             cursor = self.execute("SELECT COUNT(*) FROM users")
             return cursor.fetchone()[0]
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ የተጠቃሚ ብዛት ማግኘት አልተቻለም: {e}")
             return 0
@@ -699,10 +785,12 @@ class DatabaseMixin:
         try:
             cursor = self.execute('''
                 SELECT * FROM users 
-                WHERE last_active >= datetime('now', ?)
+                WHERE last_active >= CURRENT_TIMESTAMP - (%s * INTERVAL '1 day')
                 ORDER BY last_active DESC
-            ''', (f'-{days} days',))
+            ''', (days,))
             return [dict(row) for row in cursor.fetchall()]
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ ንቁ ተጠቃሚዎችን ማግኘት አልተቻለም: {e}")
             return []
@@ -720,7 +808,7 @@ class DatabaseMixin:
                         price, compare_price, size, category, subcategory,
                         image_id, images, stock_quantity, is_featured,
                         is_on_sale, discount_percent
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                 ''', (
                     data.get('name_am'), data.get('name_en'),
@@ -734,6 +822,8 @@ class DatabaseMixin:
                     data.get('discount_percent', 0)
                 ))
                 return cursor.fetchone()['id']
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ ምርት መፍጠር አልተቻለም: {e}")
             return None
@@ -742,7 +832,7 @@ class DatabaseMixin:
         """ምርት በID ማግኘት"""
         try:
             cursor = self.execute(
-                "SELECT * FROM products WHERE id = ?",
+                "SELECT * FROM products WHERE id = %s",
                 (product_id,)
             )
             row = cursor.fetchone()
@@ -752,6 +842,8 @@ class DatabaseMixin:
                     product['images'] = _decode_json(product['images'])
                 return product
             return None
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ ምርት ማግኘት አልተቻለም: {e}")
             return None
@@ -764,7 +856,7 @@ class DatabaseMixin:
             params = []
             
             if category:
-                query += " AND category = ?"
+                query += " AND category = %s"
                 params.append(category)
             
             allowed_sort = ['created_at', 'price', 'name_am', 'rating_avg', 'sold_count']
@@ -772,11 +864,13 @@ class DatabaseMixin:
                 sort_by = 'created_at'
             
             order = 'DESC' if order.upper() == 'DESC' else 'ASC'
-            query += f" ORDER BY {sort_by} {order} LIMIT ? OFFSET ?"
+            query += f" ORDER BY {sort_by} {order} LIMIT %s OFFSET %s"
             params.extend([limit, offset])
             
             cursor = self.execute(query, tuple(params))
             return [dict(row) for row in cursor.fetchall()]
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ ምርቶችን ማግኘት አልተቻለም: {e}")
             return []
@@ -797,18 +891,20 @@ class DatabaseMixin:
             if key in allowed_fields:
                 if key == 'images' and isinstance(value, list):
                     value = json.dumps(value)
-                fields.append(f"{key} = ?")
+                fields.append(f"{key} = %s")
                 values.append(value)
         
         if not fields:
             return False
         
         values.append(product_id)
-        query = f"UPDATE products SET {', '.join(fields)}, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+        query = f"UPDATE products SET {', '.join(fields)}, updated_at = CURRENT_TIMESTAMP WHERE id = %s"
         
         try:
             self.execute(query, tuple(values))
             return True
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ ምርት ማዘመን አልተቻለም: {e}")
             return False
@@ -816,8 +912,10 @@ class DatabaseMixin:
     def delete_product(self, product_id: int) -> bool:
         """ምርት መሰረዝ"""
         try:
-            cursor = self.execute("DELETE FROM products WHERE id = ?", (product_id,))
+            cursor = self.execute("DELETE FROM products WHERE id = %s", (product_id,))
             return cursor.rowcount > 0
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ ምርት መሰረዝ አልተቻለም: {e}")
             return False
@@ -827,7 +925,7 @@ class DatabaseMixin:
         try:
             if category:
                 cursor = self.execute(
-                    "SELECT COUNT(*) FROM products WHERE category = ? AND status = 'In Stock'",
+                    "SELECT COUNT(*) FROM products WHERE category = %s AND status = 'In Stock'",
                     (category,)
                 )
             else:
@@ -835,6 +933,8 @@ class DatabaseMixin:
                     "SELECT COUNT(*) FROM products WHERE status = 'In Stock'"
                 )
             return cursor.fetchone()[0]
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ የምርት ብዛት ማግኘት አልተቻለም: {e}")
             return 0
@@ -844,10 +944,12 @@ class DatabaseMixin:
         try:
             cursor = self.execute('''
                 SELECT * FROM products 
-                WHERE stock_quantity <= ? AND status = 'In Stock'
+                WHERE stock_quantity <= %s AND status = 'In Stock'
                 ORDER BY stock_quantity ASC
             ''', (threshold,))
             return [dict(row) for row in cursor.fetchall()]
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ ዝቅተኛ ክምችት ምርቶችን ማግኘት አልተቻለም: {e}")
             return []
@@ -859,9 +961,11 @@ class DatabaseMixin:
                 SELECT * FROM products 
                 WHERE is_featured = 1 AND status = 'In Stock'
                 ORDER BY created_at DESC
-                LIMIT ?
+                LIMIT %s
             ''', (limit,))
             return [dict(row) for row in cursor.fetchall()]
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ ተለይተው የቀረቡ ምርቶችን ማግኘት አልተቻለም: {e}")
             return []
@@ -872,18 +976,20 @@ class DatabaseMixin:
             search_term = f"%{query}%"
             cursor = self.execute('''
                 SELECT * FROM products 
-                WHERE (name_am LIKE ? OR name_en LIKE ? OR description_am LIKE ? OR description_en LIKE ?)
+                WHERE (name_am LIKE %s OR name_en LIKE %s OR description_am LIKE %s OR description_en LIKE %s)
                 AND status = 'In Stock'
                 ORDER BY 
                     CASE 
-                        WHEN name_am LIKE ? OR name_en LIKE ? THEN 1
+                        WHEN name_am LIKE %s OR name_en LIKE %s THEN 1
                         ELSE 2
                     END,
                     created_at DESC
-                LIMIT ?
+                LIMIT %s
             ''', (search_term, search_term, search_term, search_term, 
                   query, query, limit))
             return [dict(row) for row in cursor.fetchall()]
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ ምርቶችን መፈለግ አልተቻለም: {e}")
             return []
@@ -901,7 +1007,7 @@ class DatabaseMixin:
                         discount_amount, shipping_amount, tax_amount, final_amount,
                         status, payment_method, shipping_address,
                         shipping_city, shipping_phone, shipping_name, notes
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                 ''', (
                     data.get('order_number'),
@@ -921,6 +1027,8 @@ class DatabaseMixin:
                     data.get('notes')
                 ))
                 return cursor.fetchone()['id']
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ ትዕዛዝ መፍጠር አልተቻለም: {e}")
             return None
@@ -929,11 +1037,13 @@ class DatabaseMixin:
         """ትዕዛዝ በID ማግኘት"""
         try:
             cursor = self.execute(
-                "SELECT * FROM orders WHERE id = ?",
+                "SELECT * FROM orders WHERE id = %s",
                 (order_id,)
             )
             row = cursor.fetchone()
             return dict(row) if row else None
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ ትዕዛዝ ማግኘት አልተቻለም: {e}")
             return None
@@ -942,11 +1052,13 @@ class DatabaseMixin:
         """ትዕዛዝ በቁጥር ማግኘት"""
         try:
             cursor = self.execute(
-                "SELECT * FROM orders WHERE order_number = ?",
+                "SELECT * FROM orders WHERE order_number = %s",
                 (order_number,)
             )
             row = cursor.fetchone()
             return dict(row) if row else None
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ ትዕዛዝ ማግኘት አልተቻለም: {e}")
             return None
@@ -957,19 +1069,67 @@ class DatabaseMixin:
             cursor = self.execute('''
                 SELECT o.*, 
                        COUNT(oi.id) as item_count,
-                       GROUP_CONCAT(p.name_am) as product_names
+                       STRING_AGG(p.name_am, ',') as product_names
                 FROM orders o
                 LEFT JOIN order_items oi ON o.id = oi.order_id
                 LEFT JOIN products p ON oi.product_id = p.id
-                WHERE o.user_id = ?
+                WHERE o.user_id = %s
                 GROUP BY o.id
                 ORDER BY o.order_date DESC
-                LIMIT ?
+                LIMIT %s
             ''', (user_id, limit))
             return [dict(row) for row in cursor.fetchall()]
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ የተጠቃሚ ትዕዛዞችን ማግኘት አልተቻለም: {e}")
             return []
+
+    def get_orders_by_status(
+        self,
+        status: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[Dict]:
+        """Return admin order cards with customer and line-item details."""
+        query = '''
+            SELECT o.*,
+                   COALESCE(
+                       NULLIF(o.shipping_name, ''),
+                       NULLIF(u.first_name, ''),
+                       NULLIF(u.username, ''),
+                       o.user_id::TEXT
+                   ) AS customer_name,
+                   COALESCE(NULLIF(o.shipping_phone, ''), u.phone, '') AS customer_phone,
+                   COALESCE((
+                       SELECT jsonb_agg(
+                           jsonb_build_object(
+                               'name_am', COALESCE(p.name_am, 'Item'),
+                               'name_en', COALESCE(p.name_en, 'Item'),
+                               'quantity', oi.quantity,
+                               'size', oi.size_at_time,
+                               'total_price', oi.total_price
+                           ) ORDER BY oi.id
+                       )
+                       FROM order_items oi
+                       LEFT JOIN products p ON p.id = oi.product_id
+                       WHERE oi.order_id = o.id
+                   ), '[]'::jsonb) AS items
+            FROM orders o
+            LEFT JOIN users u ON u.user_id = o.user_id
+        '''
+        params = [limit]
+        normalized_status = (status or '').strip().lower()
+        if normalized_status:
+            statuses = (
+                ['completed', 'delivered']
+                if normalized_status in ('completed', 'delivered')
+                else [normalized_status]
+            )
+            query += ' WHERE LOWER(BTRIM(o.status)) = ANY(%s)'
+            params.insert(0, statuses)
+        query += ' ORDER BY o.order_date DESC, o.id DESC LIMIT %s'
+        cursor = self.execute(query, tuple(params))
+        return [dict(row) for row in cursor.fetchall()]
     
     def update_order_status(self, order_id: int, status: str, admin_notes: str = None) -> bool:
         """የትዕዛዝ ሁኔታ ማዘመን"""
@@ -979,23 +1139,26 @@ class DatabaseMixin:
                 if admin_notes:
                     cursor.execute('''
                         UPDATE orders 
-                        SET status = ?, admin_notes = ?, updated_at = CURRENT_TIMESTAMP
-                        WHERE id = ?
+                        SET status = %s, admin_notes = %s, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = %s
                     ''', (status, admin_notes, order_id))
                 else:
                     cursor.execute('''
                         UPDATE orders 
-                        SET status = ?, updated_at = CURRENT_TIMESTAMP
-                        WHERE id = ?
+                        SET status = %s, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = %s
                     ''', (status, order_id))
+                updated = cursor.rowcount > 0
                 
                 # ትዕዛዙ ከተጠናቀቀ ሰዓቱን መመዝገብ
-                if status == 'Delivered':
+                if updated and status.strip().lower() in ('delivered', 'completed'):
                     cursor.execute('''
-                        UPDATE orders SET delivered_at = CURRENT_TIMESTAMP WHERE id = ?
+                        UPDATE orders SET delivered_at = CURRENT_TIMESTAMP WHERE id = %s
                     ''', (order_id,))
                 
-                return True
+                return updated
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ የትዕዛዝ ሁኔታ ማዘመን አልተቻለም: {e}")
             return False
@@ -1007,9 +1170,11 @@ class DatabaseMixin:
                 SELECT oi.*, p.name_am, p.name_en, p.image_id
                 FROM order_items oi
                 LEFT JOIN products p ON oi.product_id = p.id
-                WHERE oi.order_id = ?
+                WHERE oi.order_id = %s
             ''', (order_id,))
             return [dict(row) for row in cursor.fetchall()]
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ የትዕዛዝ ዝርዝሮችን ማግኘት አልተቻለም: {e}")
             return []
@@ -1018,14 +1183,18 @@ class DatabaseMixin:
                        price: float, size: str = None, discount: float = 0) -> bool:
         """የትዕዛዝ ዝርዝር መጨመር"""
         try:
-            total = price * quantity * (1 - discount / 100)
+            price = Decimal(str(price))
+            discount = Decimal(str(discount))
+            total = price * quantity * (Decimal('1') - discount / Decimal('100'))
             self.execute('''
                 INSERT INTO order_items 
                 (order_id, product_id, quantity, price_at_time, size_at_time, 
                  total_price, discount_at_time)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
             ''', (order_id, product_id, quantity, price, size, total, discount))
             return True
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ የትዕዛዝ ዝርዝር መጨመር አልተቻለም: {e}")
             return False
@@ -1036,7 +1205,7 @@ class DatabaseMixin:
         """የተጠቃሚ ጋሪ ማግኘት"""
         try:
             cursor = self.execute(
-                "SELECT * FROM carts WHERE user_id = ?",
+                "SELECT * FROM carts WHERE user_id = %s",
                 (user_id,)
             )
             row = cursor.fetchone()
@@ -1044,8 +1213,13 @@ class DatabaseMixin:
                 cart = dict(row)
                 if cart.get('items'):
                     cart['items'] = _decode_json(cart['items'])
+                    for item in cart['items']:
+                        if item.get('price') is not None:
+                            item['price'] = Decimal(str(item['price']))
                 return cart
             return None
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ ጋሪ ማግኘት አልተቻለም: {e}")
             return None
@@ -1055,24 +1229,39 @@ class DatabaseMixin:
         """ጋሪ ማዘመን"""
         try:
             # ጠቅላላ ዋጋ ማስላት
-            total = sum(item.get('price', 0) * item.get('quantity', 0) for item in items)
-            discount_amount = 0
+            total = sum(
+                (Decimal(str(item.get('price', 0))) * item.get('quantity', 0) for item in items),
+                Decimal('0'),
+            )
+            discount_amount = Decimal('0')
             final_amount = total
             
             if discount_code:
                 discount = self.get_discount_by_code(discount_code)
                 if discount and discount['is_active']:
-                    discount_amount = total * (discount['discount_percent'] / 100)
+                    discount_amount = total * (discount['discount_percent'] / Decimal('100'))
                     final_amount = total - discount_amount
             
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
-                    INSERT OR REPLACE INTO carts 
+                    INSERT INTO carts
                     (user_id, items, total_amount, discount_amount, final_amount, discount_code)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                ''', (user_id, json.dumps(items), total, discount_amount, final_amount, discount_code))
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (user_id) DO UPDATE SET
+                        items = EXCLUDED.items,
+                        total_amount = EXCLUDED.total_amount,
+                        discount_amount = EXCLUDED.discount_amount,
+                        final_amount = EXCLUDED.final_amount,
+                        discount_code = EXCLUDED.discount_code,
+                        updated_at = CURRENT_TIMESTAMP
+                ''', (
+                    user_id, json.dumps(items, default=_json_default),
+                    total, discount_amount, final_amount, discount_code,
+                ))
                 return True
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ ጋሪ ማዘመን አልተቻለም: {e}")
             return False
@@ -1080,8 +1269,10 @@ class DatabaseMixin:
     def clear_cart(self, user_id: int) -> bool:
         """ጋሪ ማጽዳት"""
         try:
-            self.execute("DELETE FROM carts WHERE user_id = ?", (user_id,))
+            self.execute("DELETE FROM carts WHERE user_id = %s", (user_id,))
             return True
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ ጋሪ ማጽዳት አልተቻለም: {e}")
             return False
@@ -1098,7 +1289,7 @@ class DatabaseMixin:
                         code, discount_percent, description, discount_type,
                         min_order_amount, max_discount_amount,
                         valid_from, valid_to, usage_limit, user_limit
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                 ''', (
                     data.get('code').upper(),
@@ -1113,6 +1304,8 @@ class DatabaseMixin:
                     data.get('user_limit', 0)
                 ))
                 return cursor.fetchone()['id']
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ ቅናሽ መፍጠር አልተቻለም: {e}")
             return None
@@ -1121,11 +1314,13 @@ class DatabaseMixin:
         """ቅናሽ በኮድ ማግኘት"""
         try:
             cursor = self.execute(
-                "SELECT * FROM discounts WHERE code = ? AND is_active = 1",
+                "SELECT * FROM discounts WHERE code = %s AND is_active = 1",
                 (code.upper(),)
             )
             row = cursor.fetchone()
             return dict(row) if row else None
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ ቅናሽ ማግኘት አልተቻለም: {e}")
             return None
@@ -1138,7 +1333,7 @@ class DatabaseMixin:
                 cursor.execute('''
                     UPDATE discounts 
                     SET used_count = used_count + 1 
-                    WHERE id = ? AND (usage_limit = 0 OR used_count < usage_limit)
+                    WHERE id = %s AND (usage_limit = 0 OR used_count < usage_limit)
                 ''', (discount_id,))
                 
                 if cursor.rowcount == 0:
@@ -1146,9 +1341,11 @@ class DatabaseMixin:
                 
                 cursor.execute('''
                     INSERT INTO discount_usage (discount_id, user_id, order_id)
-                    VALUES (?, ?, ?)
+                    VALUES (%s, %s, %s)
                 ''', (discount_id, user_id, order_id))
                 return True
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ ቅናሽ መጠቀም አልተቻለም: {e}")
             return False
@@ -1161,9 +1358,15 @@ class DatabaseMixin:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
-                    INSERT OR REPLACE INTO reviews 
+                    INSERT INTO reviews
                     (user_id, product_id, rating, comment, images, is_verified)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (user_id, product_id) DO UPDATE SET
+                        rating = EXCLUDED.rating,
+                        comment = EXCLUDED.comment,
+                        images = EXCLUDED.images,
+                        is_verified = EXCLUDED.is_verified,
+                        updated_at = CURRENT_TIMESTAMP
                 ''', (
                     data.get('user_id'),
                     data.get('product_id'),
@@ -1176,17 +1379,19 @@ class DatabaseMixin:
                 # የምርት አማካኝ ደረጃ ማስላት
                 cursor.execute('''
                     SELECT AVG(rating) as avg_rating, COUNT(*) as count
-                    FROM reviews WHERE product_id = ?
+                    FROM reviews WHERE product_id = %s
                 ''', (data.get('product_id'),))
                 result = cursor.fetchone()
                 
                 cursor.execute('''
                     UPDATE products 
-                    SET rating_avg = ?, rating_count = ?
-                    WHERE id = ?
+                    SET rating_avg = %s, rating_count = %s
+                    WHERE id = %s
                 ''', (result['avg_rating'] or 0, result['count'], data.get('product_id')))
                 
                 return True
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ ግምገማ መጨመር አልተቻለም: {e}")
             return False
@@ -1198,11 +1403,13 @@ class DatabaseMixin:
                 SELECT r.*, u.username, u.first_name
                 FROM reviews r
                 JOIN users u ON r.user_id = u.user_id
-                WHERE r.product_id = ?
+                WHERE r.product_id = %s
                 ORDER BY r.created_at DESC
-                LIMIT ?
+                LIMIT %s
             ''', (product_id, limit))
             return [dict(row) for row in cursor.fetchall()]
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ ግምገማዎችን ማግኘት አልተቻለም: {e}")
             return []
@@ -1215,9 +1422,11 @@ class DatabaseMixin:
         try:
             self.execute('''
                 INSERT INTO activity_logs (user_id, action, details, ip_address, user_agent)
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s)
             ''', (user_id, action, details, ip, user_agent))
             return True
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ እንቅስቃሴ መመዝገብ አልተቻለም: {e}")
             return False
@@ -1228,9 +1437,11 @@ class DatabaseMixin:
             cursor = self.execute('''
                 SELECT * FROM activity_logs 
                 ORDER BY created_at DESC 
-                LIMIT ?
+                LIMIT %s
             ''', (limit,))
             return [dict(row) for row in cursor.fetchall()]
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ የእንቅስቃሴ ሎጎችን ማግኘት አልተቻለም: {e}")
             return []
@@ -1240,11 +1451,13 @@ class DatabaseMixin:
         try:
             cursor = self.execute('''
                 SELECT * FROM activity_logs 
-                WHERE user_id = ?
+                WHERE user_id = %s
                 ORDER BY created_at DESC 
-                LIMIT ?
+                LIMIT %s
             ''', (user_id, limit))
             return [dict(row) for row in cursor.fetchall()]
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ የተጠቃሚ እንቅስቃሴ ማግኘት አልተቻለም: {e}")
             return []
@@ -1265,11 +1478,13 @@ class DatabaseMixin:
                     SUM(tax_amount) as total_tax
                 FROM orders
                 WHERE status = 'Delivered'
-                AND order_date >= datetime('now', ?)
+                AND order_date >= CURRENT_TIMESTAMP - (%s * INTERVAL '1 day')
                 GROUP BY DATE(order_date)
                 ORDER BY sale_date DESC
-            ''', (f'-{days} days',))
+            ''', (days,))
             return [dict(row) for row in cursor.fetchall()]
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ የሽያጭ ሪፖርት ማግኘት አልተቻለም: {e}")
             return []
@@ -1292,9 +1507,11 @@ class DatabaseMixin:
                 LEFT JOIN orders o ON oi.order_id = o.id AND o.status = 'Delivered'
                 GROUP BY p.id
                 ORDER BY total_sold DESC
-                LIMIT ?
+                LIMIT %s
             ''', (limit,))
             return [dict(row) for row in cursor.fetchall()]
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ ከፍተኛ ምርቶችን ማግኘት አልተቻለም: {e}")
             return []
@@ -1314,6 +1531,8 @@ class DatabaseMixin:
                 ORDER BY product_count DESC
             ''')
             return [dict(row) for row in cursor.fetchall()]
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ የምድብ ስታቲስቲክስ ማግኘት አልተቻለም: {e}")
             return []
@@ -1329,8 +1548,12 @@ class DatabaseMixin:
                 FROM orders
                 GROUP BY status
             ''')
-            stats = {row['status']: {'count': row['count'], 'total': row['total_amount']} 
-                    for row in cursor.fetchall()}
+            stats = {}
+            for row in cursor.fetchall():
+                key = str(row['status']).strip().title()
+                totals = stats.setdefault(key, {'count': 0, 'total': 0})
+                totals['count'] += row['count']
+                totals['total'] += row['total_amount'] or 0
             
             cursor = self.execute('''
                 SELECT 
@@ -1340,7 +1563,7 @@ class DatabaseMixin:
                     MAX(final_amount) as max_order,
                     MIN(final_amount) as min_order
                 FROM orders
-                WHERE status = 'Delivered'
+                WHERE LOWER(BTRIM(status)) IN ('delivered', 'completed')
             ''')
             result = cursor.fetchone()
             
@@ -1353,6 +1576,8 @@ class DatabaseMixin:
             }
             
             return stats
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ የትዕዛዝ ስታቲስቲክስ ማግኘት አልተቻለም: {e}")
             return {}
@@ -1362,13 +1587,16 @@ class DatabaseMixin:
         try:
             cursor = self.execute('''
                 SELECT 
-                    (SELECT COUNT(*) FROM users WHERE DATE(registered_at) = DATE('now')) as new_users,
-                    (SELECT COUNT(*) FROM orders WHERE DATE(order_date) = DATE('now')) as new_orders,
+                    (SELECT COUNT(*) FROM users WHERE DATE(registered_at) = CURRENT_DATE) as new_users,
+                    (SELECT COUNT(*) FROM orders WHERE DATE(order_date) = CURRENT_DATE) as new_orders,
                     (SELECT COALESCE(SUM(final_amount), 0) FROM orders 
-                     WHERE DATE(order_date) = DATE('now') AND status = 'Delivered') as daily_revenue,
-                    (SELECT COUNT(*) FROM products WHERE DATE(created_at) = DATE('now')) as new_products
+                     WHERE DATE(order_date) = CURRENT_DATE
+                       AND LOWER(BTRIM(status)) IN ('delivered', 'completed')) as daily_revenue,
+                    (SELECT COUNT(*) FROM products WHERE DATE(created_at) = CURRENT_DATE) as new_products
             ''')
             return dict(cursor.fetchone())
+        except psycopg2.Error:
+            raise
         except Exception as e:
             logger.error(f"❌ የዕለት ስታቲስቲክስ ማግኘት አልተቻለም: {e}")
             return {}

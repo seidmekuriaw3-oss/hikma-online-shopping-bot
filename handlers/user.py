@@ -14,10 +14,57 @@ from telebot.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 
 from database import Database
 from utils.helpers import get_text, get_user_lang, format_currency, format_date
-from keyboards.inline import get_back_keyboard
+from keyboards.inline import get_back_keyboard, get_contact_keyboard
 from services.notifications import notify_admins
 
 logger = logging.getLogger(__name__)
+
+
+def show_user_profile(message: Message, db: Database, bot: TeleBot, user_id=None):
+    """Render the profile with compact order and wishlist statistics."""
+    user_id = user_id if user_id is not None else message.from_user.id
+    lang = get_user_lang(db, user_id)
+    user = db.get_user(user_id)
+    if not user:
+        return bot.send_message(message.chat.id, get_text(lang, 'user_not_found'))
+
+    orders = db.get_user_orders(user_id)
+    cart = db.get_cart(user_id)
+    cart_items = cart.get('items') if cart else []
+    if isinstance(cart_items, str):
+        import json
+        cart_items = json.loads(cart_items)
+    wishlist_count = db.execute(
+        "SELECT COUNT(*) FROM wishlists WHERE user_id = %s",
+        (user_id,),
+    ).fetchone()[0]
+    language_name = 'አማርኛ' if lang == 'am' else 'English'
+    name = f"{user.get('first_name') or ''} {user.get('last_name') or ''}".strip()
+    msg = (
+        f"👤 {name or 'Customer'}\n"
+        f"🌐 {'ቋንቋ' if lang == 'am' else 'Language'}: {language_name}\n"
+        f"📱 {'ስልክ' if lang == 'am' else 'Phone'}: {user.get('phone') or '—'}\n"
+        f"📋 {'ትዕዛዞች' if lang == 'am' else 'Orders'}: {len(orders)}\n"
+        f"❤️ {'ተወዳጆች' if lang == 'am' else 'Wishlist'}: {wishlist_count}\n"
+        f"🛒 {'በጋሪ ውስጥ' if lang == 'am' else 'Cart items'}: {len(cart_items or [])}"
+    )
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.row(
+        InlineKeyboardButton("🌐 ቋንቋ ቀይር" if lang == 'am' else "🌐 Switch Language", callback_data="change_language"),
+        InlineKeyboardButton("❤️ ተወዳጅ ምርቶች" if lang == 'am' else "❤️ My Wishlist", callback_data="my_wishlist"),
+    )
+    markup.row(
+        InlineKeyboardButton("📋 ትዕዛዞቼ" if lang == 'am' else "📋 My Orders", callback_data="view_orders"),
+        InlineKeyboardButton("🛒 ጋሪ" if lang == 'am' else "🛒 Cart", callback_data="view_cart"),
+    )
+    markup.add(InlineKeyboardButton(
+        "🔙 ዋና ሜኑ" if lang == 'am' else "🔙 Main Menu",
+        callback_data="main_menu",
+    ))
+    return bot.send_message(message.chat.id, msg, reply_markup=markup)
+
+
+_render_user_profile = show_user_profile
 
 
 def register(bot: TeleBot, db: Database):
@@ -33,82 +80,26 @@ def register(bot: TeleBot, db: Database):
         show_user_profile(message, db, bot)
     
     def show_user_profile(message: Message, db: Database, bot: TeleBot):
-        """የተጠቃሚ መገለጫ ማሳየት"""
-        user_id = message.from_user.id
-        lang = get_user_lang(db, user_id)
-        
-        user = db.get_user(user_id)
-        
-        if not user:
-            bot.send_message(
-                message.chat.id,
-                get_text(lang, 'user_not_found')
-            )
-            return
-        
-        # ስታቲስቲክስ
-        order_count = len(db.get_user_orders(user_id))
-        cart = db.get_cart(user_id)
-        cart_items = len(cart['items']) if cart and cart.get('items') else 0
-        
-        # የማስታወቂያ ሁኔታ
-        sub_status = "✅ " + get_text(lang, 'subscribed') if user.get('is_subscribed', 1) else "❌ " + get_text(lang, 'unsubscribed')
-        
-        # መገለጫ መልዕክት
-        msg = f"👤 *{get_text(lang, 'profile')}*\n\n"
-        msg += f"📝 {get_text(lang, 'name')}: {user.get('first_name', 'N/A')} {user.get('last_name', '')}\n"
-        msg += f"🔹 {get_text(lang, 'username')}: @{user.get('username', 'N/A')}\n"
-        msg += f"🆔 {get_text(lang, 'user_id')}: {user_id}\n"
-        msg += f"🌍 {get_text(lang, 'language')}: {'አማርኛ' if user.get('lang') == 'am' else 'English'}\n"
-        msg += f"📱 {get_text(lang, 'phone')}: {user.get('phone', 'N/A')}\n"
-        msg += f"📧 {get_text(lang, 'email')}: {user.get('email', 'N/A')}\n"
-        msg += f"📅 {get_text(lang, 'registered')}: {format_date(user.get('registered_at'))}\n"
-        msg += f"📋 {get_text(lang, 'orders')}: {order_count}\n"
-        msg += f"🛒 {get_text(lang, 'cart_items')}: {cart_items}\n"
-        msg += f"📢 {get_text(lang, 'subscription')}: {sub_status}\n"
-        
-        if user.get('balance', 0) > 0:
-            msg += f"💰 {get_text(lang, 'balance')}: {format_currency(user['balance'])} ETB\n"
-        
-        # ኪቦርድ
-        markup = InlineKeyboardMarkup(row_width=2)
-        markup.add(
-            InlineKeyboardButton(
-                "✏️ " + get_text(lang, 'edit_profile'),
-                callback_data="edit_profile"
-            ),
-            InlineKeyboardButton(
-                "📋 " + get_text(lang, 'my_orders'),
-                callback_data="view_orders"
-            )
+        return _render_user_profile(message, db, bot)
+
+    @bot.callback_query_handler(func=lambda call: call.data == 'view_contact')
+    def handle_view_contact(call: CallbackQuery):
+        lang = get_user_lang(db, call.from_user.id)
+        store_info = (
+            "🛍️ ሂክማ ኦንላይን ሾፒንግ\n\n"
+            "📍 የመላኪያ አድራሻ ለማዘጋጀት ከግዢ ሂደቱ ውስጥ ያስገቡ።\n"
+            "💬 ለጥያቄዎች ከታች ያለውን አዝራር ይጠቀሙ።"
+            if lang == 'am'
+            else "🛍️ Hikma Online Shopping\n\n"
+            "📍 Add your delivery address during checkout.\n"
+            "💬 For questions, use the contact button below."
         )
-        markup.add(
-            InlineKeyboardButton(
-                "🛒 " + get_text(lang, 'my_cart'),
-                callback_data="view_cart"
-            ),
-            InlineKeyboardButton(
-                "❤️ " + get_text(lang, 'my_wishlist'),
-                callback_data="show_wishlist"
-            )
-        )
-        markup.add(
-            InlineKeyboardButton(
-                "📢 " + (get_text(lang, 'subscribe') if not user.get('is_subscribed', 1) else get_text(lang, 'unsubscribe')),
-                callback_data="toggle_subscription"
-            ),
-            InlineKeyboardButton(
-                "🔙 " + get_text(lang, 'back'),
-                callback_data="main_menu"
-            )
-        )
-        
         bot.send_message(
-            message.chat.id,
-            msg,
-            reply_markup=markup,
-            parse_mode='Markdown'
+            call.message.chat.id,
+            store_info,
+            reply_markup=get_contact_keyboard(lang),
         )
+        bot.answer_callback_query(call.id)
     
     # ==================== መገለጫ ማስተካከል ====================
     
@@ -156,7 +147,7 @@ def register(bot: TeleBot, db: Database):
         except:
             pass
         
-        show_user_profile(call.message, db, bot)
+        _render_user_profile(call.message, db, bot, user_id=call.from_user.id)
         bot.answer_callback_query(call.id)
     
     @bot.callback_query_handler(func=lambda call: call.data == 'edit_phone')
@@ -282,7 +273,7 @@ def register(bot: TeleBot, db: Database):
         except:
             pass
         
-        show_user_profile(call.message, db, bot)
+        _render_user_profile(call.message, db, bot, user_id=call.from_user.id)
     
     # ==================== ማስታወቂያ መቀየር ====================
     
@@ -306,7 +297,7 @@ def register(bot: TeleBot, db: Database):
         )
         
         # መገለጫ ማሳየት
-        show_user_profile(call.message, db, bot)
+        _render_user_profile(call.message, db, bot, user_id=call.from_user.id)
     
     # ==================== ተመረጡ ====================
     
@@ -320,7 +311,7 @@ def register(bot: TeleBot, db: Database):
         result = db.execute('''
             SELECT p.* FROM wishlists w 
             JOIN products p ON w.product_id = p.id 
-            WHERE w.user_id = ?
+            WHERE w.user_id = %s
             ORDER BY w.created_at DESC
         ''', (user_id,))
         
@@ -334,24 +325,23 @@ def register(bot: TeleBot, db: Database):
             bot.answer_callback_query(call.id)
             return
         
-        msg = "❤️ *" + get_text(lang, 'my_wishlist') + "*\n\n"
-        
-        for i, product in enumerate(products[:10], 1):
+        msg = "❤️ " + get_text(lang, 'my_wishlist')
+        markup = InlineKeyboardMarkup(row_width=1)
+        for product in products[:10]:
             name = product['name_am'] if lang == 'am' else product['name_en']
-            msg += f"{i}. *{name}*\n"
-            msg += f"💰 {format_currency(product['price'])} ETB\n"
-            msg += f"🆔 /product_{product['id']}\n\n"
-        
-        if len(products) > 10:
-            msg += f"\n📌 {get_text(lang, 'and_more')} {len(products) - 10} {get_text(lang, 'items')}"
-        
-        markup = get_back_keyboard("view_profile", lang)
+            markup.add(InlineKeyboardButton(
+                f"{name} · {format_currency(product['price'])}",
+                callback_data=f"product_view_{product['id']}",
+            ))
+        markup.add(InlineKeyboardButton(
+            "🔙 መገለጫ" if lang == 'am' else "🔙 Profile",
+            callback_data="view_profile",
+        ))
         
         bot.send_message(
             call.message.chat.id,
             msg,
             reply_markup=markup,
-            parse_mode='Markdown'
         )
         bot.answer_callback_query(call.id)
     
