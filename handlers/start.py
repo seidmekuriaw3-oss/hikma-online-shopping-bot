@@ -130,7 +130,8 @@ def register(bot: TeleBot, db: Database):
         # ተጠቃሚን መመዝገብ
         user = db.get_user(user_id)
         
-        if not user:
+        is_new_user = not user
+        if is_new_user:
             # አዲስ ተጠቃሚ
             db.create_user(
                 user_id=user_id,
@@ -166,7 +167,9 @@ def register(bot: TeleBot, db: Database):
         # ቋንቋ ምርጫ ማሳየት
         lang = get_user_lang(db, user_id)
         
-        if not lang or lang not in ['am', 'en']:
+        if is_new_user:
+            show_welcome(message.chat.id, user_id, db, bot)
+        elif not lang or lang not in ['am', 'en']:
             # ቋንቋ ካልተመረጠ - የቋንቋ ምርጫ ማሳየት
             markup = get_language_menu()
             bot.send_message(

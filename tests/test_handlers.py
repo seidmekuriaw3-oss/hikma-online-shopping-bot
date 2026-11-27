@@ -622,6 +622,59 @@ def test_welcome_photo_and_caption_are_localized_for_both_languages(monkeypatch)
         assert ('🛍️ ምርቶች' in reply_buttons) == (lang == 'am')
 
 
+def test_first_time_start_sends_welcome_photo_and_customer_menu(monkeypatch):
+    monkeypatch.setattr(config.bot, 'ADMIN_IDS', [])
+    monkeypatch.setattr(config.bot, 'WELCOME_BANNER_FILE_ID', '')
+    monkeypatch.setattr(config.bot, 'WELCOME_BANNER_URL', '')
+    created_users = []
+    user_reads = []
+
+    def get_user(_user_id):
+        user_reads.append(_user_id)
+        if len(user_reads) == 1:
+            return None
+        return {'first_name': 'New', 'lang': 'unavailable'}
+
+    db = SimpleNamespace(
+        get_user=get_user,
+        create_user=lambda **user: created_users.append(user) or True,
+        update_user=lambda *_args, **_kwargs: True,
+        log_activity=lambda *_args: None,
+    )
+    bot = RecordingBot()
+    start.register(bot, db)
+    start_handler = next(
+        handler
+        for filters, handler in bot.message_handlers
+        if filters.get('commands') == ['start']
+    )
+    message = SimpleNamespace(
+        text='/start',
+        chat=SimpleNamespace(id=314),
+        from_user=SimpleNamespace(
+            id=314,
+            username='new_customer',
+            first_name='New',
+            last_name='Customer',
+        ),
+    )
+
+    start_handler(message)
+
+    assert created_users[0]['lang'] == 'am'
+    assert len(bot.photos) == 1
+    assert Path(bot.photos[0][1].name).name == 'welcome_banner.png'
+    assert bot.photos[0][0] == 314
+    assert '<b>Hikma Online Shopping</b>' in bot.photos[0][2]['caption']
+    assert len(bot.messages) == 1
+    assert bot.message_options[-1]['reply_markup'] is not None
+    assert '🛍️ Products' in [
+        button['text']
+        for row in bot.message_options[-1]['reply_markup'].keyboard
+        for button in row
+    ]
+
+
 def test_welcome_photo_failure_falls_back_to_formatted_text(monkeypatch, tmp_path):
     monkeypatch.setattr(start, 'BASE_DIR', tmp_path)
     monkeypatch.setattr(config.bot, 'WELCOME_BANNER_FILE_ID', '')
