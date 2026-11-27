@@ -38,6 +38,13 @@ def clear_support_state(user_id: int) -> None:
     awaiting_support_message.discard(user_id)
 
 
+def _has_admin_product_flow(user_id) -> bool:
+    if user_id is None:
+        return False
+    from handlers.admin import has_admin_product_flow
+    return has_admin_product_flow(user_id)
+
+
 def _normalize_keyword(text: str) -> str:
     return ''.join(character for character in text.casefold() if character.isalnum())
 
@@ -218,12 +225,17 @@ def register(bot: TeleBot, db: Database):
         user_id = message.from_user.id
         lang = get_user_lang(db, user_id)
         was_awaiting = user_id in awaiting_support_message
-        clear_support_state(user_id)
-        response_key = (
-            'support_cancelled'
-            if was_awaiting
-            else 'support_not_awaiting'
+        from handlers.admin import clear_admin_product_state
+        was_adding_product = clear_admin_product_state(
+            user_id, bot, message.chat.id
         )
+        clear_support_state(user_id)
+        if was_adding_product:
+            response_key = 'product_add_cancelled'
+        elif was_awaiting:
+            response_key = 'support_cancelled'
+        else:
+            response_key = 'support_not_awaiting'
         bot.send_message(
             message.chat.id,
             get_text(lang, response_key),
@@ -232,11 +244,13 @@ def register(bot: TeleBot, db: Database):
 
     @bot.message_handler(
         func=lambda message: (
-            getattr(getattr(message, 'from_user', None), 'id', None)
-            in awaiting_support_message
-            and _matches_keyword(
-                message.text or '',
-                _CANCEL_KEYWORDS,
+            _matches_keyword(message.text or '', _CANCEL_KEYWORDS)
+            and (
+                getattr(getattr(message, 'from_user', None), 'id', None)
+                in awaiting_support_message
+                or _has_admin_product_flow(
+                    getattr(getattr(message, 'from_user', None), 'id', None)
+                )
             )
         ),
         content_types=['text'],
@@ -244,10 +258,19 @@ def register(bot: TeleBot, db: Database):
     def cancel_support_text(message: Message):
         user_id = message.from_user.id
         lang = get_user_lang(db, user_id)
+        from handlers.admin import clear_admin_product_state
+        was_adding_product = clear_admin_product_state(
+            user_id, bot, message.chat.id
+        )
         clear_support_state(user_id)
         bot.send_message(
             message.chat.id,
-            get_text(lang, 'support_cancelled'),
+            get_text(
+                lang,
+                'product_add_cancelled'
+                if was_adding_product
+                else 'support_cancelled',
+            ),
             reply_markup=ReplyKeyboardRemove(),
         )
 

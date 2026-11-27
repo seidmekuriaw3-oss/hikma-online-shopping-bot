@@ -33,10 +33,29 @@ class _DatabaseErrorReportingBot:
     def __getattr__(self, name):
         return getattr(self._bot, name)
 
+    def _clear_product_flow_for_navigation(self, update):
+        from handlers.admin import (
+            clear_admin_product_state,
+            is_admin_product_cancel,
+            is_admin_product_navigation,
+        )
+
+        if not is_admin_product_navigation(update):
+            return False
+        if not is_admin_product_cancel(update):
+            user_id = update.from_user.id
+            message = getattr(update, 'message', None) or update
+            chat_id = getattr(getattr(message, 'chat', None), 'id', user_id)
+            clear_admin_product_state(user_id, self._bot, chat_id)
+        return True
+
     def _wrap(self, handler):
         @wraps(handler)
         def guarded(update, *args, **kwargs):
             try:
+                from handlers.admin import is_admin_product_cancel
+                if not is_admin_product_cancel(update):
+                    self._clear_product_flow_for_navigation(update)
                 return handler(update, *args, **kwargs)
             except psycopg2.Error:
                 from config import config
@@ -72,8 +91,24 @@ class _DatabaseErrorReportingBot:
         return lambda handler: decorator(self._wrap(handler))
 
     def register_next_step_handler(self, message, callback, *args, **kwargs):
+        wrapped_callback = self._wrap(callback)
+
+        @wraps(callback)
+        def route_navigation(update, *callback_args, **callback_kwargs):
+            if self._clear_product_flow_for_navigation(update):
+                from handlers.admin import is_admin_product_cancel
+                if is_admin_product_cancel(update):
+                    self._bot.clear_step_handler_by_chat_id(
+                        update.chat.id
+                    )
+                self._bot.process_new_messages([update])
+                return None
+            return wrapped_callback(
+                update, *callback_args, **callback_kwargs
+            )
+
         return self._bot.register_next_step_handler(
-            message, self._wrap(callback), *args, **kwargs
+            message, route_navigation, *args, **kwargs
         )
 
 
@@ -175,13 +210,25 @@ def register(bot: TeleBot, db: Database):
             )
 
         # ለአስተዳዳሪ የምርት መጨመር ተራ እውቅና ያለው ግብዓት በእውነተኛ ሂደት እንዲተካ ይደረጋል
-        try:
-            from handlers.admin import admin_states, route_admin_product_step
-            if user_id in admin_states and admin_states[user_id].get('action') == 'add_product':
+        from handlers.admin import (
+            admin_states,
+            clear_admin_product_state,
+            is_admin_product_navigation,
+            route_admin_product_step,
+        )
+        state = admin_states.get(user_id)
+        if state and state.get('action') in {
+            'add_product', 'manage_product_images',
+        }:
+            if is_admin_product_navigation(message):
+                clear_admin_product_state(user_id, bot, message.chat.id)
+            elif state.get('action') == 'add_product':
                 if route_admin_product_step(message, db, bot):
                     return
-        except Exception:
-            pass
+            else:
+                from handlers.admin import _process_product_image_management
+                _process_product_image_management(message, db, bot)
+                return
 
         # የተጠቃሚ እንቅስቃሴ መመዝገብ
         db.log_activity(user_id, 'message', f'ተጠቃሚ: {text[:50]}')

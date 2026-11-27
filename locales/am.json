@@ -317,6 +317,7 @@
 	"invalid_number": "እባክዎ ትክክለኛ ቁጥር ያስገቡ።",
 	"invalid_photo": "እባክዎ ትክክለኛ ፎቶ ይላኩ።",
 	"product_add_expired": "የምርት መጨመር ሂደቱ ጊዜ አልፎበታል። በ /add እንደገና ይጀምሩ።",
+	"product_add_cancelled": "የምርት መጨመር ሂደቱ ተሰርዟል።",
 	"product_added": "ምርቱ \"{}\" በተሳካ ሁኔታ ተጨምሯል።\nየምርት ID: {}",
 	"product_add_failed": "ምርቱን መጨመር አልተቻለም።",
 	"product_photo_failed": "የምርቱን ፎቶ ማስኬድ አልተቻለም።",

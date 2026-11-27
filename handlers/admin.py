@@ -39,6 +39,103 @@ logger = logging.getLogger(__name__)
 admin_states = {}
 admin_uploading = set()
 
+_PRODUCT_FLOW_ACTIONS = {'add_product', 'manage_product_images'}
+
+
+def _normalized_text(text: str) -> str:
+    return ''.join(character.casefold() for character in text if character.isalnum())
+
+
+def has_admin_product_flow(user_id: int) -> bool:
+    state = admin_states.get(user_id)
+    return bool(state and state.get('action') in _PRODUCT_FLOW_ACTIONS)
+
+
+def is_admin_product_cancel(update) -> bool:
+    text = getattr(update, 'text', None)
+    if not text:
+        return False
+    normalized = _normalized_text(text)
+    return normalized in {
+        'cancel',
+        'ሰርዝ',
+    } or text.strip().casefold() == '/cancel'
+
+
+def is_admin_product_navigation(update) -> bool:
+    user = getattr(update, 'from_user', None)
+    if user is None or not has_admin_product_flow(user.id):
+        return False
+
+    if hasattr(update, 'data'):
+        return update.data not in {
+            'admin_product_photos_done',
+        } and not update.data.startswith('add_product_category:')
+
+    text = getattr(update, 'text', None)
+    if not text:
+        return False
+    if text.lstrip().startswith('/'):
+        return True
+
+    normalized = _normalized_text(text)
+    if normalized in {'cancel', 'ሰርዝ'}:
+        return True
+
+    labels = {
+        '🛍️ ምርቶች', '🛍️ Products',
+        '🛒 ጋሪ', '🛒 Cart', 'ጋሪ 🛒', 'Cart 🛒',
+        '📋 ትዕዛዞቼ', '📋 My Orders', 'ትዕዛዞቼ 📋', 'My Orders 📋',
+        '❤️ ተወዳጆች', '❤️ Wishlist', 'My Wishlist',
+        '👤 መገለጫ', '👤 Profile', 'መገለጫ 👤', 'Profile 👤',
+        '📍 አድራሻ', '📍 አድራሻ እና ስልክ', '📍 Contact', '📍 Address',
+        '⚙️ አስተዳደር', '⚙️ አስተዳዳሪ', '⚙️ Admin', '⚙️ Admin Panel',
+        '📦 ምርቶች', '📦 Products',
+        '📋 ትዕዛዞች', '📋 Orders',
+        '👥 ተጠቃሚዎች', '👥 Users',
+        '📊 ሪፖርቶች', '📊 Reports',
+        '🏷️ ቅናሾች', '🏷️ Discounts',
+        '⚙️ ቅንብሮች', '⚙️ Settings',
+        '🔙 ወደ መጀመሪያ', '🔙 Main Menu',
+        '🇪🇹 አማርኛ', '🇬🇧 English',
+        '❓ Help', '❓ እርዳታ',
+    }
+    labels.update(
+        get_text(lang, key)
+        for lang in ('am', 'en')
+        for key in (
+            'products', 'orders', 'users', 'reports', 'discounts',
+            'settings', 'back', 'cancel', 'main_menu', 'help', 'faq',
+            'profile', 'cart', 'my_orders', 'wishlist',
+        )
+    )
+    return normalized in {_normalized_text(label) for label in labels}
+
+
+def clear_admin_product_state(
+    user_id: int,
+    bot: Optional[TeleBot] = None,
+    chat_id: Optional[int] = None,
+) -> bool:
+    if not has_admin_product_flow(user_id):
+        return False
+    admin_states.pop(user_id, None)
+    admin_uploading.discard(user_id)
+    if bot is not None:
+        if chat_id is None:
+            chat_id = user_id
+        clear_handler = getattr(bot, 'clear_step_handler_by_chat_id', None)
+        if callable(clear_handler):
+            clear_handler(chat_id)
+    return True
+
+
+def _clear_step_handler(bot: TeleBot, chat_id: Optional[int]) -> None:
+    clear_handler = getattr(bot, 'clear_step_handler_by_chat_id', None)
+    if chat_id is not None and callable(clear_handler):
+        clear_handler(chat_id)
+
+
 _ADMIN_CATEGORY_KEYS = {
     'men': 'category_men',
     "men's clothing": 'category_men',
@@ -145,6 +242,9 @@ def start_add_product(
     """አዲስ ምርት መጨመር ሂደት መጀመር"""
     user_id = user_id if user_id is not None else message.from_user.id
     lang = get_user_lang(db, user_id)
+    _clear_step_handler(bot, _get_admin_chat_id(message))
+    admin_states.pop(user_id, None)
+    admin_uploading.discard(user_id)
     state = _ensure_add_product_state(user_id)
     state.update(step=1, data={})
 
@@ -375,8 +475,9 @@ def _finish_add_product(
         _send_admin_message(
             bot, message, "❌ " + get_text(lang, 'product_add_expired')
         )
-        admin_states.pop(user_id, None)
-        admin_uploading.discard(user_id)
+        clear_admin_product_state(
+            user_id, bot, _get_admin_chat_id(message)
+        )
         return False
 
     images = get_images({'images': data.get('images', [])})
@@ -411,8 +512,7 @@ def _finish_add_product(
             message.chat.id,
             "❌ " + get_text(lang, 'product_add_failed')
         )
-    admin_states.pop(user_id, None)
-    admin_uploading.discard(user_id)
+    clear_admin_product_state(user_id, bot, _get_admin_chat_id(message))
     return bool(product_id)
 
 
@@ -523,8 +623,7 @@ def _save_managed_product_images(
             "❌ " + get_text(lang, 'product_photo_failed'),
         )
         return False
-    admin_states.pop(user_id, None)
-    admin_uploading.discard(user_id)
+    clear_admin_product_state(user_id, bot, _get_admin_chat_id(message))
     bot.send_message(
         message.chat.id,
         "✅ " + get_text(lang, 'product_photos_updated').format(

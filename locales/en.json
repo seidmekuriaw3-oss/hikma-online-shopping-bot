@@ -317,6 +317,7 @@
 	"invalid_number": "Please enter a valid number.",
 	"invalid_photo": "Please upload a valid photo.",
 	"product_add_expired": "The add-product flow expired. Start again with /add.",
+	"product_add_cancelled": "Product creation was cancelled.",
 	"product_added": "Product \"{}\" was added successfully.\nProduct ID: {}",
 	"product_add_failed": "Could not add the product.",
 	"product_photo_failed": "Could not process the product photo.",

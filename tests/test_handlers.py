@@ -84,6 +84,18 @@ class RecordingBot:
     def register_next_step_handler(self, message, handler, *args, **kwargs):
         self.next_steps.append((message, handler, args, kwargs))
 
+    def process_new_messages(self, messages):
+        for message in messages:
+            for filters, handler in self.message_handlers:
+                content_types = filters.get('content_types')
+                if content_types and message.content_type not in content_types:
+                    continue
+                predicate = filters.get('func')
+                if predicate and not predicate(message):
+                    continue
+                handler(message)
+                break
+
     def clear_step_handler_by_chat_id(self, chat_id):
         self.cleared_step_chats.append(chat_id)
 
@@ -145,6 +157,74 @@ def test_admin_delete_command_rejects_non_numeric_id(monkeypatch):
 
     assert bot.messages
     assert 'ትክክለኛ' in bot.messages[-1][1]
+
+
+def test_admin_product_photo_step_releases_navigation_messages(monkeypatch):
+    user_id = 78
+    monkeypatch.setattr(admin, 'admin_states', {})
+    monkeypatch.setattr(admin, 'admin_uploading', set())
+
+    for navigation_text in ('🛍️ ምርቶች', '⚙️ ቅንብሮች'):
+        admin.admin_states[user_id] = {
+            'action': 'add_product',
+            'step': 7,
+            'data': {'images': ['first-photo']},
+        }
+        admin.admin_uploading.add(user_id)
+        bot = RecordingBot()
+        guarded_bot = _DatabaseErrorReportingBot(bot)
+        routed = []
+        guarded_bot.message_handler(
+            func=lambda message: message.text == navigation_text,
+            content_types=['text'],
+        )(lambda message: routed.append(message.text))
+        prompt = SimpleNamespace(chat=SimpleNamespace(id=user_id))
+        guarded_bot.register_next_step_handler(prompt, lambda _message: None)
+
+        message = SimpleNamespace(
+            text=navigation_text,
+            content_type='text',
+            from_user=SimpleNamespace(id=user_id),
+            chat=SimpleNamespace(id=user_id),
+        )
+        _, next_step, args, kwargs = bot.next_steps[-1]
+        next_step(message, *args, **kwargs)
+
+        assert routed == [navigation_text]
+        assert user_id not in admin.admin_states
+        assert user_id not in admin.admin_uploading
+        assert bot.cleared_step_chats == [user_id]
+
+
+def test_cancel_command_clears_active_product_photo_state(monkeypatch):
+    user_id = 79
+    monkeypatch.setattr(admin, 'admin_states', {
+        user_id: {
+            'action': 'add_product',
+            'step': 7,
+            'data': {'images': ['first-photo']},
+        },
+    })
+    monkeypatch.setattr(admin, 'admin_uploading', {user_id})
+    db = SimpleNamespace(get_user=lambda _user_id: {'lang': 'en'})
+    bot = RecordingBot()
+    support.register(_DatabaseErrorReportingBot(bot, db), db)
+
+    cancel_handler = next(
+        handler
+        for filters, handler in bot.message_handlers
+        if filters.get('commands') == ['cancel']
+    )
+    cancel_handler(SimpleNamespace(
+        text='/cancel',
+        from_user=SimpleNamespace(id=user_id),
+        chat=SimpleNamespace(id=user_id),
+    ))
+
+    assert user_id not in admin.admin_states
+    assert user_id not in admin.admin_uploading
+    assert bot.cleared_step_chats == [user_id]
+    assert 'cancelled' in bot.messages[-1][1].lower()
 
 
 def test_add_command_registers_first_step_on_prompt(monkeypatch):
@@ -214,7 +294,6 @@ def test_add_product_callback_tracks_fresh_admin_through_all_steps(monkeypatch):
         ('3', 'text'),
         (None, 'photo'),
         (None, 'photo'),
-        ('✅ Done', 'text'),
     ]
     for index, (text, content_type) in enumerate(responses):
         _, handler, args, kwargs = bot.next_steps[-1]
@@ -229,6 +308,21 @@ def test_add_product_callback_tracks_fresh_admin_through_all_steps(monkeypatch):
         )
         handler(message, *args, **kwargs)
 
+    done_handler = next(
+        handler
+        for filters, handler in bot.callback_handlers
+        if filters['func'](SimpleNamespace(data='admin_product_photos_done'))
+    )
+    done_handler(SimpleNamespace(
+        id='finish-product-photos',
+        data='admin_product_photos_done',
+        from_user=SimpleNamespace(id=user_id),
+        message=SimpleNamespace(
+            chat=SimpleNamespace(id=user_id),
+            from_user=SimpleNamespace(id=user_id),
+        ),
+    ))
+
     assert created_products == [{
         'name_am': 'ሸሚዝ',
         'name_en': 'Shirt',
@@ -241,6 +335,7 @@ def test_add_product_callback_tracks_fresh_admin_through_all_steps(monkeypatch):
         'status': 'In Stock',
     }]
     assert user_id not in admin.admin_states
+    assert user_id in bot.cleared_step_chats
 
 
 def test_admin_add_product_category_can_be_selected_inline_end_to_end(monkeypatch):
