@@ -1401,6 +1401,90 @@ def test_commands_are_registered_before_the_text_fallback():
     assert not bot.message_handlers[catchall_index][0]['func'](slash_message)
 
 
+def test_help_keywords_route_before_product_search_regardless_of_language():
+    db = SimpleNamespace(
+        get_user=lambda _user_id: {'lang': 'en'},
+        log_activity=lambda *_args: None,
+    )
+    bot = RecordingBot()
+    register_handlers(bot, db)
+    catchall_index = next(
+        index
+        for index, (filters, _) in enumerate(bot.message_handlers)
+        if filters.get('content_types') == ['text']
+        and filters.get('func')
+        and filters['func'](SimpleNamespace(text='ordinary message'))
+    )
+
+    for text in ('እርዳታ', '❓ እርዳታ', 'እፈልጋለሁ', 'Help', '❓ help', '  HELP  '):
+        message = SimpleNamespace(
+            text=text,
+            from_user=SimpleNamespace(id=42),
+            chat=SimpleNamespace(id=42),
+        )
+        matching = [
+            (index, handler)
+            for index, (filters, handler) in enumerate(bot.message_handlers)
+            if filters.get('func') and filters['func'](message)
+        ]
+
+        assert matching[0][1].__name__ == 'help_text_command'
+        assert matching[0][0] < catchall_index
+        matching[0][1](message)
+        assert bot.messages[-1][1] == 'Use the menu buttons to browse products, manage your cart, and view your orders. Contact support if you need help.'
+
+
+def test_main_menu_keywords_route_before_product_search(monkeypatch):
+    shown = []
+    monkeypatch.setattr(start, 'show_welcome', lambda *args: shown.append(args))
+    db = SimpleNamespace(
+        get_user=lambda _user_id: {'lang': 'am'},
+        log_activity=lambda *_args: None,
+    )
+    bot = RecordingBot()
+    register_handlers(bot, db)
+
+    for text in ('ወደ መጀመሪያ', 'ዋና ማውጫ', 'Main Menu', '🔙 Main Menu'):
+        message = SimpleNamespace(
+            text=text,
+            from_user=SimpleNamespace(id=42),
+            chat=SimpleNamespace(id=42),
+        )
+        matching = [
+            handler
+            for filters, handler in bot.message_handlers
+            if filters.get('func') and filters['func'](message)
+        ]
+
+        assert matching[0].__name__ == 'menu_text_command'
+        matching[0](message)
+
+    assert len(shown) == 4
+
+
+def test_help_back_button_and_locale_labels_have_one_back_emoji():
+    for lang in ('am', 'en'):
+        locale_path = Path(__file__).parent.parent / 'locales' / f'{lang}.json'
+        locale = json.loads(locale_path.read_text(encoding='utf-8'))
+        assert '🔙' not in locale['back']
+
+        db = SimpleNamespace(get_user=lambda _user_id: {'lang': lang})
+        bot = RecordingBot()
+        start.register(bot, db)
+        help_handler = next(
+            handler
+            for filters, handler in bot.message_handlers
+            if filters.get('commands') == ['help']
+        )
+        help_handler(SimpleNamespace(
+            text='/help',
+            from_user=SimpleNamespace(id=42),
+            chat=SimpleNamespace(id=42),
+        ))
+        back_label = bot.message_options[-1]['reply_markup'].keyboard[0][0].text
+        assert back_label.count('🔙') == 1
+
+
 def test_checkout_order_is_reachable_from_orders_command_and_inline_button(monkeypatch):
     monkeypatch.setattr(config.bot, 'ADMIN_IDS', [])
     order = {

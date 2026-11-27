@@ -23,6 +23,26 @@ from services.notifications import notify_admin
 
 logger = logging.getLogger(__name__)
 
+HELP_TEXT_KEYWORDS = {'እርዳታ', 'እፈልጋለሁ', 'help'}
+MAIN_MENU_TEXT_KEYWORDS = {
+    'ወደ መጀመሪያ',
+    'ዋና ማውጫ',
+    'main menu',
+}
+
+
+def _normalize_menu_keyword(text: Optional[str]) -> str:
+    return ''.join(
+        character
+        for character in (text or '').casefold()
+        if character.isalnum()
+    )
+
+
+def _matches_menu_keywords(text: Optional[str], keywords: set) -> bool:
+    normalized = _normalize_menu_keyword(text)
+    return normalized in {_normalize_menu_keyword(keyword) for keyword in keywords}
+
 
 def show_welcome(chat_id: int, user_id: int, db: Database, bot: TeleBot):
     """Send the branded welcome photo and localized customer menus."""
@@ -214,6 +234,22 @@ def register(bot: TeleBot, db: Database):
             reply_markup=markup,
             parse_mode='Markdown'
         )
+
+    @bot.message_handler(
+        func=lambda message: _matches_menu_keywords(
+            message.text, HELP_TEXT_KEYWORDS
+        )
+    )
+    def help_text_command(message: Message):
+        help_command(message)
+
+    @bot.message_handler(
+        func=lambda message: _matches_menu_keywords(
+            message.text, MAIN_MENU_TEXT_KEYWORDS
+        )
+    )
+    def menu_text_command(message: Message):
+        menu_command(message)
 
     @bot.message_handler(commands=['lang'])
     def language_command(message: Message):

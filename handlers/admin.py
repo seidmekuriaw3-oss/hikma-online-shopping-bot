@@ -796,7 +796,7 @@ def register(bot: TeleBot, db: Database):
             get_text(lang, 'reports'),
             get_text(lang, 'discounts'),
             get_text(lang, 'settings'),
-            get_text(lang, 'back'),
+            "🔙 " + get_text(lang, 'back'),
         ]
         
         markup.add(*[KeyboardButton(btn) for btn in buttons])

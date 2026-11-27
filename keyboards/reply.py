@@ -48,7 +48,7 @@ def get_admin_menu(user_id: int, lang: str = 'am') -> ReplyKeyboardMarkup:
         KeyboardButton(get_text(lang, 'reports')),
         KeyboardButton(get_text(lang, 'discounts')),
         KeyboardButton(get_text(lang, 'settings')),
-        KeyboardButton(get_text(lang, 'back'))
+        KeyboardButton("🔙 " + get_text(lang, 'back'))
     ]
     
     markup.add(*buttons)
@@ -70,7 +70,7 @@ def get_contact_menu(lang: str = 'am') -> ReplyKeyboardMarkup:
     markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
     markup.add(
         KeyboardButton(get_text(lang, 'share_contact'), request_contact=True),
-        KeyboardButton(get_text(lang, 'back'))
+        KeyboardButton("🔙 " + get_text(lang, 'back'))
     )
     return markup
 
@@ -134,7 +134,7 @@ def get_order_status_menu(lang: str = 'am') -> ReplyKeyboardMarkup:
         KeyboardButton("🚚 " + get_text(lang, 'shipped')),
         KeyboardButton("✅ " + get_text(lang, 'delivered')),
         KeyboardButton("❌ " + get_text(lang, 'cancelled')),
-        KeyboardButton(get_text(lang, 'back'))
+        KeyboardButton("🔙 " + get_text(lang, 'back'))
     )
     return markup
 
