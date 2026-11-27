@@ -338,11 +338,17 @@ def register(bot: TeleBot, db: Database):
         try:
             payment_id = int(call.data.replace('verify_payment_', ''))
         except ValueError:
-            bot.answer_callback_query(call.id, "❌ Invalid payment")
+            bot.answer_callback_query(
+                call.id,
+                "❌ " + get_text(lang, 'invalid_payment'),
+            )
             return
 
         if not get_owned_payment(payment_id, user_id):
-            bot.answer_callback_query(call.id, "❌ Payment not found")
+            bot.answer_callback_query(
+                call.id,
+                "❌ " + get_text(lang, 'payment_not_found'),
+            )
             return
         
         # ክፍያ ማረጋገጥ
@@ -403,11 +409,17 @@ def register(bot: TeleBot, db: Database):
         try:
             payment_id = int(call.data.replace('cancel_payment_', ''))
         except ValueError:
-            bot.answer_callback_query(call.id, "❌ Invalid payment")
+            bot.answer_callback_query(
+                call.id,
+                "❌ " + get_text(lang, 'invalid_payment'),
+            )
             return
 
         if not get_owned_payment(payment_id, user_id):
-            bot.answer_callback_query(call.id, "❌ Payment not found")
+            bot.answer_callback_query(
+                call.id,
+                "❌ " + get_text(lang, 'payment_not_found'),
+            )
             return
         
         # ክፍያ መሰረዝ
@@ -440,11 +452,17 @@ def register(bot: TeleBot, db: Database):
         try:
             payment_id = int(call.data.replace('confirm_bank_payment_', ''))
         except ValueError:
-            bot.answer_callback_query(call.id, "❌ Invalid payment")
+            bot.answer_callback_query(
+                call.id,
+                "❌ " + get_text(lang, 'invalid_payment'),
+            )
             return
 
         if not get_owned_payment(payment_id, user_id):
-            bot.answer_callback_query(call.id, "❌ Payment not found")
+            bot.answer_callback_query(
+                call.id,
+                "❌ " + get_text(lang, 'payment_not_found'),
+            )
             return
         
         msg = bot.send_message(

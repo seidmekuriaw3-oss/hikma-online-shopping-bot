@@ -131,6 +131,9 @@ def test_admin_photo_upload_helpers_handle_add_product_state():
     )
 
     class FakeDB:
+        def get_user(self, _user_id):
+            return {'lang': 'am'}
+
         def create_product(self, product_data):
             return 42
 

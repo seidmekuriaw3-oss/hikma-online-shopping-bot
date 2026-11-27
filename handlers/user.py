@@ -15,6 +15,7 @@ from telebot.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from database import Database
 from utils.helpers import get_text, get_user_lang, format_currency, format_date
 from keyboards.inline import get_back_keyboard, get_contact_keyboard
+from keyboards.reply import get_main_menu
 from services.notifications import notify_admins
 
 logger = logging.getLogger(__name__)
@@ -41,7 +42,7 @@ def show_user_profile(message: Message, db: Database, bot: TeleBot, user_id=None
     language_name = 'አማርኛ' if lang == 'am' else 'English'
     name = f"{user.get('first_name') or ''} {user.get('last_name') or ''}".strip()
     msg = (
-        f"👤 {name or 'Customer'}\n"
+        f"👤 {name or get_text(lang, 'customer_name')}\n"
         f"🌐 {'ቋንቋ' if lang == 'am' else 'Language'}: {language_name}\n"
         f"📱 {'ስልክ' if lang == 'am' else 'Phone'}: {user.get('phone') or '—'}\n"
         f"📋 {'ትዕዛዞች' if lang == 'am' else 'Orders'}: {len(orders)}\n"
@@ -233,6 +234,7 @@ def register(bot: TeleBot, db: Database):
     def handle_change_language(call: CallbackQuery):
         """ቋንቋ መቀየር"""
         user_id = call.from_user.id
+        lang = get_user_lang(db, user_id)
         
         markup = InlineKeyboardMarkup(row_width=2)
         markup.add(
@@ -241,15 +243,14 @@ def register(bot: TeleBot, db: Database):
         )
         markup.add(
             InlineKeyboardButton(
-                "🔙 " + get_text('am', 'back'),
+                "🔙 " + get_text(lang, 'back'),
                 callback_data="view_profile"
             )
         )
         
         bot.send_message(
             call.message.chat.id,
-            "🌍 " + get_text('am', 'choose_language') + "\n\n" +
-            "Choose your preferred language:",
+            "🌍 " + get_text(lang, 'choose_language'),
             reply_markup=markup
         )
         bot.answer_callback_query(call.id)
@@ -259,6 +260,9 @@ def register(bot: TeleBot, db: Database):
         """ቋንቋ ማዘመን"""
         user_id = call.from_user.id
         lang = call.data.replace('set_lang_', '')
+        if lang not in ('am', 'en'):
+            bot.answer_callback_query(call.id)
+            return
         
         db.update_user(user_id, lang=lang)
         db.log_activity(user_id, 'change_language', f'ቋንቋ: {lang}')
@@ -266,6 +270,12 @@ def register(bot: TeleBot, db: Database):
         bot.answer_callback_query(
             call.id,
             "✅ " + get_text(lang, 'language_updated')
+        )
+
+        bot.send_message(
+            call.message.chat.id,
+            get_text(lang, 'main_menu_hint'),
+            reply_markup=get_main_menu(user_id, db),
         )
         
         try:

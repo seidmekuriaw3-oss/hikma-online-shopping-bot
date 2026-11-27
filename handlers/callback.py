@@ -27,7 +27,7 @@ def show_wishlist(chat_id: int, user_id: int, db: Database, bot: TeleBot):
         for product in products[:20]:
             name = product.get('name_am') if lang == 'am' else product.get('name_en')
             markup.add(InlineKeyboardButton(
-                f"{name or product.get('name_am')} · {format_currency(product['price'])}",
+                f"{name or get_text(lang, 'product')} · {format_currency(product['price'])}",
                 callback_data=f"product_view_{product['id']}",
             ))
     markup.add(InlineKeyboardButton(
@@ -45,11 +45,11 @@ def register(bot: TeleBot, db: Database):
         if not discounts:
             bot.answer_callback_query(
                 call.id,
-                "በአሁኑ ጊዜ ቅናሽ የለም" if lang == 'am' else "No active discounts",
+                get_text(lang, 'no_active_discounts'),
             )
             return
 
-        title = "🏷️ ንቁ ቅናሾች" if lang == 'am' else "🏷️ Active Discounts"
+        title = "🏷️ " + get_text(lang, 'active_discounts')
         lines = [title, ""]
         for discount in discounts[:10]:
             lines.append(f"• {discount['code']} — {discount['discount_percent']}%")
@@ -82,13 +82,13 @@ def register(bot: TeleBot, db: Database):
                 "DELETE FROM wishlists WHERE user_id = %s AND product_id = %s",
                 (user_id, product_id),
             )
-            response = "❤️ ከተወዳጆች ተወግዷል" if lang == 'am' else "❤️ Removed from wishlist"
+            response = "❤️ " + get_text(lang, 'removed_from_wishlist')
         else:
             db.execute(
                 "INSERT INTO wishlists (user_id, product_id) VALUES (%s, %s)",
                 (user_id, product_id),
             )
-            response = "❤️ ወደ ተወዳጆች ተጨምሯል" if lang == 'am' else "❤️ Added to wishlist"
+            response = "❤️ " + get_text(lang, 'added_to_wishlist')
         db.log_activity(user_id, 'wishlist', f'Product {product_id}')
         bot.answer_callback_query(call.id, response)
 
@@ -106,9 +106,9 @@ def register(bot: TeleBot, db: Database):
         db.update_user(user_id, is_subscribed=int(subscribe))
         bot.answer_callback_query(
             call.id,
-            ("✅ ተመዝግበዋል" if subscribe else "🔕 ምዝገባ ተቋርጧል")
-            if lang == 'am'
-            else ("✅ Subscribed" if subscribe else "🔕 Unsubscribed"),
+            ("✅ " + get_text(lang, 'subscribed'))
+            if subscribe
+            else ("🔕 " + get_text(lang, 'unsubscribed')),
         )
 
     @bot.callback_query_handler(func=lambda call: call.data == 'ignore')
@@ -119,7 +119,8 @@ def register(bot: TeleBot, db: Database):
     def handle_unknown_callback(call: CallbackQuery):
         bot.answer_callback_query(
             call.id,
-            "❌ ይህ አዝራር ጊዜው አልፏል። ሜኑውን እንደገና ይክፈቱ።"
-            if get_user_lang(db, call.from_user.id) == 'am'
-            else "❌ This button has expired. Please reopen the menu.",
+            "❌ " + get_text(
+                get_user_lang(db, call.from_user.id),
+                'button_expired',
+            ),
         )

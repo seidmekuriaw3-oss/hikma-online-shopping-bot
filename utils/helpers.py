@@ -157,10 +157,10 @@ def format_payment_method(method: Optional[str], lang: str = 'am') -> str:
     """Render payment identifiers as customer-friendly localized labels."""
     normalized = (method or '').strip().lower().replace('-', '_').replace(' ', '_')
     labels = {
-        'cash': ("💵 በጥሬ ገንዘብ (Cash on Delivery)", "💵 Cash on Delivery"),
-        'cash_on_delivery': ("💵 በጥሬ ገንዘብ (Cash on Delivery)", "💵 Cash on Delivery"),
-        'bank': ("🏦 በባንክ ማስተላለፍ (Bank Transfer)", "🏦 Bank Transfer"),
-        'bank_transfer': ("🏦 በባንክ ማስተላለፍ (Bank Transfer)", "🏦 Bank Transfer"),
+        'cash': ("💵 በጥሬ ገንዘብ", "💵 Cash on Delivery"),
+        'cash_on_delivery': ("💵 በጥሬ ገንዘብ", "💵 Cash on Delivery"),
+        'bank': ("🏦 በባንክ ማስተላለፍ", "🏦 Bank Transfer"),
+        'bank_transfer': ("🏦 በባንክ ማስተላለፍ", "🏦 Bank Transfer"),
         'chapa': ("💳 Chapa", "💳 Chapa"),
         'telebirr': ("📱 Telebirr", "📱 Telebirr"),
     }

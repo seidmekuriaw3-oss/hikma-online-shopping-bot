@@ -1,3 +1,6 @@
+import json
+import re
+from pathlib import Path
 from types import SimpleNamespace
 
 import psycopg2
@@ -10,9 +13,11 @@ from handlers import (
 from keyboards.inline import (
     get_admin_keyboard, get_admin_product_category_keyboard,
     get_main_keyboard, get_payment_keyboard, get_product_keyboard, get_social_keyboard,
+    get_start_keyboard,
     get_storefront_categories_keyboard,
 )
 from keyboards.reply import get_main_menu
+from services.notifications import send_order_update, send_payment_confirmation
 
 
 class RecordingBot:
@@ -91,6 +96,7 @@ def test_admin_delete_command_deletes_only_existing_products(monkeypatch):
     monkeypatch.setattr(config.bot, 'ADMIN_IDS', [42])
     deleted = []
     db = SimpleNamespace(
+        get_user=lambda _user_id: {'lang': 'am'},
         get_product=lambda product_id: {'id': product_id} if product_id == 7 else None,
         delete_product=lambda product_id: deleted.append(product_id) or True,
         log_activity=lambda *args: None,
@@ -116,7 +122,10 @@ def test_admin_delete_command_deletes_only_existing_products(monkeypatch):
 
 def test_admin_delete_command_rejects_non_numeric_id(monkeypatch):
     monkeypatch.setattr(config.bot, 'ADMIN_IDS', [42])
-    db = SimpleNamespace(get_product=lambda product_id: {'id': product_id})
+    db = SimpleNamespace(
+        get_user=lambda _user_id: {'lang': 'am'},
+        get_product=lambda product_id: {'id': product_id},
+    )
     bot = RecordingBot()
     admin.register(bot, db)
     delete_handler = next(
@@ -138,7 +147,7 @@ def test_admin_delete_command_rejects_non_numeric_id(monkeypatch):
 
 def test_add_command_registers_first_step_on_prompt(monkeypatch):
     monkeypatch.setattr(config.bot, 'ADMIN_IDS', [42])
-    db = SimpleNamespace()
+    db = SimpleNamespace(get_user=lambda _user_id: {'lang': 'am'})
     bot = RecordingBot()
     admin.register(bot, db)
     add_handler = next(
@@ -457,6 +466,364 @@ def test_welcome_inline_products_button_opens_category_picker():
         if button.callback_data == 'browse_categories'
     )
     assert products_button.text == '🛍️ Products'
+
+
+def test_welcome_photo_and_caption_are_localized_for_both_languages(monkeypatch):
+    monkeypatch.setattr(config.bot, 'ADMIN_IDS', [])
+    monkeypatch.setattr(config.bot, 'WELCOME_BANNER_FILE_ID', '')
+    monkeypatch.setattr(config.bot, 'WELCOME_BANNER_URL', '')
+
+    for lang, expected, other_language in (
+        ('am', 'ፈጣንና አስተማማኝ መላኪያ', 'Fast, reliable delivery'),
+        ('en', 'Fast, reliable delivery', 'ፈጣንና አስተማማኝ መላኪያ'),
+    ):
+        db = SimpleNamespace(
+            get_user=lambda _user_id, lang=lang: {
+                'first_name': 'Customer *<&>', 'lang': lang,
+            },
+        )
+        bot = RecordingBot()
+        start.show_welcome(42, 42, db, bot)
+
+        assert len(bot.photos) == 1
+        caption = bot.photos[0][2]['caption']
+        assert '<b>Hikma Online Shopping</b>' in caption
+        assert 'Customer &#42;&lt;&amp;&gt;' in caption
+        assert '*' not in caption
+        assert expected in caption
+        assert other_language not in caption
+        assert bot.photos[0][2]['parse_mode'] == 'HTML'
+        assert Path(bot.photos[0][1].name).name == 'welcome_banner.png'
+        inline_buttons = [
+            button
+            for row in bot.photos[0][2]['reply_markup'].keyboard
+            for button in row
+        ]
+        assert [button.text for button in inline_buttons] == [
+            '🛍️ ሱቁን ይጎብኙ' if lang == 'am' else '🛍️ Browse Shop',
+            '🌐 ቋንቋ' if lang == 'am' else '🌐 Language',
+        ]
+        reply_buttons = [
+            button['text']
+            for row in bot.message_options[-1]['reply_markup'].keyboard
+            for button in row
+        ]
+        assert len(reply_buttons) == 6
+        assert ('🛍️ Products' in reply_buttons) == (lang == 'en')
+        assert ('🛍️ ምርቶች' in reply_buttons) == (lang == 'am')
+
+
+def test_welcome_photo_failure_falls_back_to_formatted_text(monkeypatch, tmp_path):
+    monkeypatch.setattr(start, 'BASE_DIR', tmp_path)
+    monkeypatch.setattr(config.bot, 'WELCOME_BANNER_FILE_ID', '')
+    monkeypatch.setattr(config.bot, 'WELCOME_BANNER_URL', '')
+
+    class PhotoFailingBot(RecordingBot):
+        def send_photo(self, *_args, **_kwargs):
+            raise OSError('photo upload failed')
+
+    bot = PhotoFailingBot()
+    db = SimpleNamespace(
+        get_user=lambda _user_id: {'first_name': 'Customer', 'lang': 'en'},
+    )
+    start.show_welcome(42, 42, db, bot)
+
+    assert len(bot.messages) == 2
+    assert '<b>Hikma Online Shopping</b>' in bot.messages[0][1]
+    assert bot.message_options[0]['parse_mode'] == 'HTML'
+    assert bot.message_options[-1]['reply_markup'] is not None
+
+
+def test_storefront_categories_and_product_cards_use_selected_language():
+    for lang, category_text, opposite_text, name in (
+        ('am', 'የሴቶች ፋሽን', "Women's Fashion", 'ቀሚስ'),
+        ('en', "Women's Fashion", 'የሴቶች ፋሽን', 'Dress'),
+    ):
+        keyboard = get_storefront_categories_keyboard(lang=lang)
+        category_labels = [
+            button.text for row in keyboard.keyboard for button in row
+        ]
+        expected_categories = (
+            [
+                '👗 የሴቶች ፋሽን',
+                '👕 የወንዶች ፋሽን',
+                '👶 የልጆች አልባሳት',
+                '🛌 ፒጃማ እና የቤት ልብስ',
+                '👟 ጫማዎች',
+                '👜 ቦርሳ እና መዋቢያ',
+                '✨ አዲስ የገቡ',
+                '🔥 ቅናሽ ያላቸው',
+                '🔙 ዋና ሜኑ',
+            ]
+            if lang == 'am'
+            else [
+                "👗 Women's Fashion",
+                "👕 Men's Fashion",
+                '👶 Kids & Baby',
+                '🛌 Pajamas & Loungewear',
+                '👟 Shoes & Footwear',
+                '👜 Bags & Accessories',
+                '✨ New Arrivals',
+                '🔥 Hot Deals',
+                '🔙 Main Menu',
+            ]
+        )
+        assert category_labels == expected_categories
+        assert any(category_text in label for label in category_labels)
+        assert all(opposite_text not in label for label in category_labels)
+
+        caption = products._product_caption(
+            {
+                'name_am': 'ቀሚስ',
+                'name_en': 'Dress',
+                'price': 120,
+                'size': 'M',
+                'stock_quantity': 2,
+            },
+            index=0,
+            total=1,
+            lang=lang,
+        )
+        assert name in caption
+        assert ('Price:' in caption) == (lang == 'en')
+        assert ('ዋጋ:' in caption) == (lang == 'am')
+        assert ('In Stock' in caption) == (lang == 'en')
+        assert ('በክምችት ላይ' in caption) == (lang == 'am')
+
+
+def test_cart_summary_uses_selected_language():
+    for lang, expected, other in (
+        ('am', 'ጠቅላላ', 'Subtotal'),
+        ('en', 'Subtotal', 'ጠቅላላ'),
+    ):
+        product = {
+            'id': 8,
+            'name_am': 'ቀሚስ',
+            'name_en': 'Dress',
+            'stock_quantity': 3,
+        }
+        db = SimpleNamespace(
+            get_user=lambda _user_id, lang=lang: {'lang': lang},
+            get_cart=lambda _user_id: {
+                'items': [{'product_id': 8, 'price': 10, 'quantity': 2}],
+                'final_amount': 20,
+                'discount_amount': 0,
+            },
+            get_product=lambda _product_id: product,
+        )
+        bot = RecordingBot()
+        orders.register(bot, db)
+        message = SimpleNamespace(
+            chat=SimpleNamespace(id=42),
+            from_user=SimpleNamespace(id=42),
+        )
+
+        orders.show_cart(message, db, bot)
+
+        assert expected in bot.messages[-1][1]
+        assert other not in bot.messages[-1][1]
+        buttons = [
+            button.text
+            for row in bot.message_options[-1]['reply_markup'].keyboard
+            for button in row
+        ]
+        assert ('✅ Checkout' in buttons) == (lang == 'en')
+        assert ('✅ አሁን ይዘዙ' in buttons) == (lang == 'am')
+
+
+def test_profile_and_order_status_notification_are_localized():
+    for lang, expected, other in (
+        ('am', 'ቋንቋ', 'Language'),
+        ('en', 'Language', 'ቋንቋ'),
+    ):
+        order = {
+            'id': 5,
+            'user_id': 42,
+            'order_number': 'HIK-5',
+            'status': 'Shipped',
+            'updated_at': '2026-11-27',
+        }
+        db = SimpleNamespace(
+            get_user=lambda _user_id, lang=lang: {
+                'first_name': 'Customer',
+                'lang': lang,
+                'user_id': 42,
+            },
+            get_user_orders=lambda _user_id: [],
+            get_cart=lambda _user_id: {'items': []},
+            execute=lambda *_args: SimpleNamespace(fetchone=lambda: (0,)),
+            get_order=lambda _order_id: order,
+        )
+        bot = RecordingBot()
+        user.show_user_profile(
+            SimpleNamespace(
+                chat=SimpleNamespace(id=42),
+                from_user=SimpleNamespace(id=42),
+            ),
+            db,
+            bot,
+        )
+        profile_text = bot.messages[-1][1]
+        assert expected in profile_text
+        assert other not in profile_text
+
+        bot = RecordingBot()
+        send_order_update(bot, order['id'], db)
+        notification = bot.messages[-1][1]
+        assert ('ተልኳል' in notification) == (lang == 'am')
+        assert ('Shipped' in notification) == (lang == 'en')
+
+
+def test_order_list_status_and_summary_are_localized():
+    order = {
+        'id': 5,
+        'order_number': 'HIK-5',
+        'status': 'Delivered',
+        'order_date': '2026-11-27',
+        'item_count': 2,
+        'final_amount': 200,
+    }
+    for lang, expected, other in (
+        ('am', 'ተረክቧል', 'Delivered'),
+        ('en', 'Delivered', 'ተረክቧል'),
+    ):
+        db = SimpleNamespace(
+            get_user=lambda _user_id, lang=lang: {'lang': lang},
+            get_user_orders=lambda _user_id, limit=10: [order],
+        )
+        bot = RecordingBot()
+        orders.register(bot, db)
+        message = SimpleNamespace(
+            chat=SimpleNamespace(id=42),
+            from_user=SimpleNamespace(id=42),
+        )
+
+        orders.show_user_orders(message, db, bot)
+
+        assert expected in bot.messages[-1][1]
+        assert other not in bot.messages[-1][1]
+
+
+def test_admin_order_card_uses_selected_language_for_labels_and_fallbacks():
+    order = {
+        'id': 5,
+        'order_number': 'HIK-5',
+        'status': 'Delivered',
+        'customer_name': None,
+        'customer_phone': '0912345678',
+        'items': [{
+            'name_am': 'ሸሚዝ',
+            'name_en': 'Shirt',
+            'quantity': 1,
+            'total_price': 200,
+        }],
+        'final_amount': 200,
+        'shipping_address': 'Addis Ababa',
+        'payment_method': 'cash',
+    }
+    for lang, expected, other in (
+        ('am', ('ደንበኛ', 'ደርሷል', 'ሸሚዝ'), ('Customer', 'Delivered', 'Shirt')),
+        ('en', ('Customer', 'Delivered', 'Shirt'), ('ደንበኛ', 'ደርሷል', 'ሸሚዝ')),
+    ):
+        text, _keyboard = admin.format_admin_order_card(order, lang)
+        assert all(value in text for value in expected)
+        assert all(value not in text for value in other)
+
+
+def test_admin_category_report_localizes_known_category_names():
+    for lang, expected, other in (
+        ('am', 'የወንዶች ፋሽን', "Men's Fashion"),
+        ('en', "Men's Fashion", 'የወንዶች ፋሽን'),
+    ):
+        db = SimpleNamespace(
+            get_user=lambda _user_id: {'lang': lang},
+            get_category_stats=lambda: [
+                {'category': 'Men', 'product_count': 2},
+            ],
+        )
+        bot = RecordingBot()
+        message = SimpleNamespace(
+            chat=SimpleNamespace(id=42),
+            from_user=SimpleNamespace(id=42),
+        )
+
+        admin.show_category_report(message, db, bot)
+
+        assert expected in bot.messages[-1][1]
+        assert other not in bot.messages[-1][1]
+
+
+def test_admin_product_added_notification_is_localized(monkeypatch):
+    sent = []
+    monkeypatch.setattr(
+        admin,
+        'notify_admins',
+        lambda _bot, text, parse_mode=None: sent.append((text, parse_mode)),
+    )
+    product = {
+        'name_am': 'ጫማ',
+        'name_en': 'Shoes',
+        'price': 250,
+        'size': 'M',
+        'category': 'Men',
+        'stock_quantity': 3,
+    }
+
+    for lang, expected, other in (
+        ('am', ('ጫማ', 'የወንዶች ፋሽን', 'ዋጋ'), ('Shoes', "Men's Fashion", 'Price')),
+        ('en', ('Shoes', "Men's Fashion", 'Price'), ('ጫማ', 'የወንዶች ፋሽን', 'ዋጋ')),
+    ):
+        admin._notify_product_added(RecordingBot(), product, 5, lang)
+        text, parse_mode = sent[-1]
+        assert all(value in text for value in expected)
+        assert all(value not in text for value in other)
+        assert parse_mode is None
+
+
+def test_payment_confirmation_status_is_localized():
+    for lang, expected, other in (
+        ('am', 'ተጠናቋል', 'Completed'),
+        ('en', 'Completed', 'ተጠናቋል'),
+    ):
+        payment = {
+            'user_id': 42,
+            'amount': 100,
+            'method': 'cash',
+            'transaction_id': 'TX-1',
+            'completed_at': '2026-11-27',
+            'created_at': '2026-11-26',
+            'status': 'completed',
+        }
+        db = SimpleNamespace(
+            get_payment=lambda _payment_id: payment,
+            get_user=lambda _user_id: {'user_id': 42, 'lang': lang},
+        )
+        bot = RecordingBot()
+        send_payment_confirmation(bot, 1, db)
+        message = bot.messages[-1][1]
+        assert expected in message
+        assert other not in message
+
+
+def test_all_referenced_translation_keys_exist_in_both_locales():
+    root = Path(__file__).resolve().parent.parent
+    referenced = set()
+    pattern = re.compile(
+        r"get_text\(\s*[^,]+,\s*['\"]([^'\"]+)['\"]"
+    )
+    for directory in ('handlers', 'keyboards', 'services'):
+        for source in (root / directory).rglob('*.py'):
+            referenced.update(pattern.findall(source.read_text(encoding='utf-8')))
+
+    locales = {
+        language: json.loads(
+            (root / 'locales' / f'{language}.json').read_text(encoding='utf-8')
+        )
+        for language in ('am', 'en')
+    }
+    assert not (referenced - locales['am'].keys())
+    assert not (referenced - locales['en'].keys())
+    assert locales['am'].keys() == locales['en'].keys()
 
 
 def test_message_module_routes_new_products_and_wishlist_buttons():
@@ -784,6 +1151,40 @@ def test_profile_language_button_opens_amharic_and_english_choices(monkeypatch):
         message=SimpleNamespace(chat=SimpleNamespace(id=42)),
     ))
     assert profile['lang'] == 'en'
+    main_keyboard = next(
+        options['reply_markup']
+        for options in bot.message_options
+        if options.get('reply_markup') is not None
+        and options['reply_markup'].__class__.__name__ == 'ReplyKeyboardMarkup'
+    )
+    main_buttons = [
+        button['text']
+        for row in main_keyboard.keyboard
+        for button in row
+    ]
+    assert '🛍️ Products' in main_buttons
+    assert '🛍️ ምርቶች' not in main_buttons
+
+    change_handler(SimpleNamespace(
+        id='language-choice-am',
+        data='set_lang_am',
+        from_user=SimpleNamespace(id=42),
+        message=SimpleNamespace(chat=SimpleNamespace(id=42)),
+    ))
+    assert profile['lang'] == 'am'
+    am_keyboard = next(
+        options['reply_markup']
+        for options in reversed(bot.message_options)
+        if options.get('reply_markup') is not None
+        and options['reply_markup'].__class__.__name__ == 'ReplyKeyboardMarkup'
+    )
+    am_buttons = [
+        button['text']
+        for row in am_keyboard.keyboard
+        for button in row
+    ]
+    assert '🛍️ ምርቶች' in am_buttons
+    assert '🛍️ Products' not in am_buttons
 
 
 def test_checkout_confirms_phone_and_address_before_payment():
@@ -1195,8 +1596,9 @@ def test_payment_keyboard_uses_localized_readable_labels():
     keyboard = get_payment_keyboard('am')
     labels = [button.text for row in keyboard.keyboard for button in row]
 
-    assert '💵 በጥሬ ገንዘብ (Cash on Delivery)' in labels
-    assert '🏦 በባንክ ማስተላለፍ (Bank Transfer)' in labels
+    assert '💵 በጥሬ ገንዘብ' in labels
+    assert '🏦 በባንክ ማስተላለፍ' in labels
+    assert not any('Cash on Delivery' in label or 'Bank Transfer' in label for label in labels)
     assert '💳 Chapa' in labels
     assert '📱 Telebirr' in labels
     assert not any('_' in label for label in labels)
@@ -1224,28 +1626,37 @@ def test_admin_inline_keyboard_routes_to_registered_admin_features():
 
 def test_postgres_handler_failure_sends_user_friendly_message():
     bot = RecordingBot()
-    guarded_bot = _DatabaseErrorReportingBot(bot)
+    db = SimpleNamespace(get_user=lambda _user_id: {'lang': 'en'})
+    guarded_bot = _DatabaseErrorReportingBot(bot, db)
 
     @guarded_bot.message_handler()
     def fail(_message):
         raise psycopg2.OperationalError('database unavailable')
 
-    message = SimpleNamespace(chat=SimpleNamespace(id=42))
+    message = SimpleNamespace(
+        chat=SimpleNamespace(id=42),
+        from_user=SimpleNamespace(id=42),
+    )
     bot.message_handlers[-1][1](message)
 
     assert bot.messages
-    assert 'try again later' in bot.messages[-1][1]
+    assert 'Please try again later' in bot.messages[-1][1]
 
 
 def test_postgres_callback_failure_shows_safe_alert():
     bot = RecordingBot()
-    guarded_bot = _DatabaseErrorReportingBot(bot)
+    db = SimpleNamespace(get_user=lambda _user_id: {'lang': 'en'})
+    guarded_bot = _DatabaseErrorReportingBot(bot, db)
 
     @guarded_bot.callback_query_handler()
     def fail(_call):
         raise psycopg2.IntegrityError('database constraint detail')
 
-    call = SimpleNamespace(id='callback-id', data='test')
+    call = SimpleNamespace(
+        id='callback-id',
+        data='test',
+        from_user=SimpleNamespace(id=42),
+    )
     bot.callback_handlers[-1][1](call)
 
     assert bot.callback_answers
@@ -1256,8 +1667,12 @@ def test_postgres_callback_failure_shows_safe_alert():
 
 def test_postgres_next_step_failure_sends_user_friendly_message():
     bot = RecordingBot()
-    guarded_bot = _DatabaseErrorReportingBot(bot)
-    message = SimpleNamespace(chat=SimpleNamespace(id=42))
+    db = SimpleNamespace(get_user=lambda _user_id: {'lang': 'en'})
+    guarded_bot = _DatabaseErrorReportingBot(bot, db)
+    message = SimpleNamespace(
+        chat=SimpleNamespace(id=42),
+        from_user=SimpleNamespace(id=42),
+    )
 
     def fail(_message):
         raise psycopg2.OperationalError('database unavailable')
@@ -1267,4 +1682,4 @@ def test_postgres_next_step_failure_sends_user_friendly_message():
     next_step_handler(message)
 
     assert bot.messages
-    assert 'try again later' in bot.messages[-1][1]
+    assert 'Please try again later' in bot.messages[-1][1]

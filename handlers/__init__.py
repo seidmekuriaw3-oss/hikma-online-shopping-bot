@@ -26,8 +26,9 @@ logger = logging.getLogger(__name__)
 class _DatabaseErrorReportingBot:
     """Report PostgreSQL failures from message and callback handlers safely."""
 
-    def __init__(self, bot):
+    def __init__(self, bot, db=None):
         self._bot = bot
+        self._db = db
 
     def __getattr__(self, name):
         return getattr(self._bot, name)
@@ -38,9 +39,19 @@ class _DatabaseErrorReportingBot:
             try:
                 return handler(update, *args, **kwargs)
             except psycopg2.Error:
-                message = (
-                    "⚠️ የውሂብ ጎታ አገልግሎት ለጊዜው አልተገኘም። እባክዎ ቆይተው ይሞክሩ።\n"
-                    "The shopping service is temporarily unavailable. Please try again later."
+                from config import config
+                lang = config.language.DEFAULT_LANGUAGE
+                user = getattr(update, 'from_user', None)
+                if self._db is not None and user is not None:
+                    try:
+                        lang = get_user_lang(self._db, user.id)
+                    except psycopg2.Error:
+                        logger.warning(
+                            "Could not load user language while reporting a database failure"
+                        )
+                message = "⚠️ " + get_text(
+                    lang,
+                    'database_unavailable',
                 )
                 try:
                     if hasattr(update, 'data') and hasattr(update, 'id'):
@@ -108,9 +119,18 @@ def show_admin_panel(message: Message, db: Database, bot: TeleBot):
     """Display the admin keyboard for an admin user."""
     from config import config
     if message.from_user.id not in config.bot.ADMIN_IDS:
-        bot.send_message(message.chat.id, "⛔ ይህን ክፍል ለመጠቀም ፈቃድ የለዎትም።")
+        lang = get_user_lang(db, message.from_user.id)
+        bot.send_message(
+            message.chat.id,
+            "⛔ " + get_text(lang, 'not_admin'),
+        )
         return False
-    bot.send_message(message.chat.id, "⚙️ የአስተዳዳሪ ፓነል", reply_markup=get_admin_menu(message.from_user.id, get_user_lang(db, message.from_user.id)))
+    lang = get_user_lang(db, message.from_user.id)
+    bot.send_message(
+        message.chat.id,
+        "⚙️ " + get_text(lang, 'admin_panel'),
+        reply_markup=get_admin_menu(message.from_user.id, lang),
+    )
     return True
 
 
@@ -118,7 +138,7 @@ def register_handlers(bot: TeleBot, db: Database):
     """Package-level API expected by main.py."""
     from handlers import start, products, orders, payments, user, admin, callback
 
-    guarded_bot = _DatabaseErrorReportingBot(bot)
+    guarded_bot = _DatabaseErrorReportingBot(bot, db)
     # Register specific handlers before messages.py's catch-all text handler.
     for module in (start, products, orders, payments, user, admin, callback):
         module.register(guarded_bot, db)
@@ -245,7 +265,8 @@ def register(bot: TeleBot, db: Database):
         
         # መደበኛ የፎቶ መልዕክት
         db.log_activity(user_id, 'photo', 'ፎቶ ልኳል')
-        bot.reply_to(message, "📸 ፎቶዎ ተቀብያለሁ! በቅርቡ እንመለከተዋለን.")
+        lang = get_user_lang(db, user_id)
+        bot.reply_to(message, "📸 " + get_text(lang, 'photo_received'))
     
     # ==================== ሌሎች የመልዕክት አይነቶች ====================
     
@@ -253,13 +274,15 @@ def register(bot: TeleBot, db: Database):
     def handle_document_messages(message: Message):
         """የዶክመንት መልዕክቶች አያያዝ"""
         user_id = message.from_user.id
+        lang = get_user_lang(db, user_id)
         db.log_activity(user_id, 'document', 'ዶክመንት ልኳል')
-        bot.reply_to(message, "📄 ዶክመንትዎ ተቀብያለሁ!")
+        bot.reply_to(message, "📄 " + get_text(lang, 'document_received'))
     
     @bot.message_handler(content_types=['contact'])
     def handle_contact_messages(message: Message):
         """የእውቂያ መልዕክቶች አያያዝ"""
         user_id = message.from_user.id
+        lang = get_user_lang(db, user_id)
         contact = message.contact
         
         if contact:
@@ -270,13 +293,14 @@ def register(bot: TeleBot, db: Database):
             
             bot.reply_to(
                 message,
-                f"✅ የስልክ ቁጥርዎ {phone} ተመዝግቧል! 🙏"
+                "✅ " + get_text(lang, 'contact_received').format(phone)
             )
     
     @bot.message_handler(content_types=['location'])
     def handle_location_messages(message: Message):
         """የመገኛ መልዕክቶች አያያዝ"""
         user_id = message.from_user.id
+        lang = get_user_lang(db, user_id)
         location = message.location
         
         if location:
@@ -287,9 +311,10 @@ def register(bot: TeleBot, db: Database):
             )
             bot.reply_to(
                 message,
-                f"📍 መገኛዎ ተቀብያለሁ!\n"
-                f"🗺️ ኬክሮስ: {location.latitude}\n"
-                f"🗺️ ኬንትሮስ: {location.longitude}"
+                "📍 " + get_text(lang, 'location_received').format(
+                    location.latitude,
+                    location.longitude,
+                )
             )
     
     # ==================== ረዳት ተግባራት ====================
@@ -337,8 +362,7 @@ def register(bot: TeleBot, db: Database):
         # ነባሪ መልስ
         bot.reply_to(
             message,
-            f"❓ እባክዎ ከሜኑ አዝራሮች ይምረጡ.\n\n"
-            f"💡 እርዳታ ከፈለጉ /help ይጫኑ"
+            "❓ " + get_text(lang, 'menu_help_hint')
         )
     
     # ==================== ስህተት አያያዝ ====================
@@ -362,6 +386,5 @@ def register(bot: TeleBot, db: Database):
         
         bot.reply_to(
             message,
-            f"📨 መልዕክትዎ ተቀብያለሁ! "
-            f"በቅርቡ እንመለከተዋለን. 🙏"
+            "📨 " + get_text(get_user_lang(db, user_id), 'unsupported_content_received')
         )

@@ -34,7 +34,7 @@ product_cache = {}
 
 def _product_caption(product: Dict, index: int, total: int, lang: str) -> str:
     name = product.get('name_am') if lang == 'am' else product.get('name_en')
-    name = name or product.get('name_am') or product.get('name_en') or 'Product'
+    name = name or get_text(lang, 'product')
     size = product.get('size') or ('ሁሉም መጠኖች' if lang == 'am' else 'One size')
     status_value = str(product.get('status') or 'In Stock').strip().lower()
     in_stock = product.get('stock_quantity', 0) > 0 and status_value not in {
@@ -194,17 +194,24 @@ def search_products(message: Message, query: str, db: Database, bot: TeleBot):
     products = db.search_products(query, limit=20)
 
     if not products:
-        bot.send_message(message.chat.id, f"🔍 ለ '{query}' ምንም ምርት አልተገኘም")
+        bot.send_message(
+            message.chat.id,
+            "🔍 " + get_text(lang, 'search_no_results').format(query),
+        )
         return []
 
     markup = InlineKeyboardMarkup(row_width=1)
     for product in products[:10]:
         name = product.get('name_am') if lang == 'am' else product.get('name_en')
         markup.add(InlineKeyboardButton(
-            f"{name or product.get('name_am')} · {format_currency(product['price'])}",
+            f"{name or get_text(lang, 'product')} · {format_currency(product['price'])}",
             callback_data=f"product_view_{product['id']}",
         ))
-    bot.send_message(message.chat.id, f"🔍 Search results for “{query}”", reply_markup=markup)
+    bot.send_message(
+        message.chat.id,
+        f"🔍 {get_text(lang, 'search_results')}: “{query}”",
+        reply_markup=markup,
+    )
     return products
 
 
@@ -433,7 +440,11 @@ def register(bot: TeleBot, db: Database):
         
         bot.answer_callback_query(
             call.id, 
-            get_text(lang, 'added_to_cart').format(product['name_am'], quantity)
+            get_text(lang, 'added_to_cart').format(
+                product.get('name_am' if lang == 'am' else 'name_en')
+                or get_text(lang, 'product'),
+                quantity,
+            )
         )
         
         # የምርት ዝርዝር ማሳየት
@@ -503,7 +514,7 @@ def register(bot: TeleBot, db: Database):
         
         msg = bot.send_message(
             call.message.chat.id,
-            "💬 አስተያየትዎን ይጻፉ (ካልፈለጉ 'skip' ይተይቡ):"
+            "💬 " + get_text(lang, 'review_comment_prompt')
         )
         bot.register_next_step_handler(msg, process_review_comment, product_id, db, bot)
         bot.answer_callback_query(call.id)
@@ -513,7 +524,8 @@ def register(bot: TeleBot, db: Database):
         user_id = message.from_user.id
         lang = get_user_lang(db, user_id)
         
-        comment = None if message.text.lower() == 'skip' else message.text
+        skip_values = ('skip', 'ዝለል') if lang == 'am' else ('skip',)
+        comment = None if message.text.lower() in skip_values else message.text
         
         # ግምገማ ማዘመን
         success = db.add_review({
@@ -525,12 +537,12 @@ def register(bot: TeleBot, db: Database):
         if success:
             bot.send_message(
                 message.chat.id,
-                "✅ አስተያየትዎ ተመዝግቧል! እናመሰግናለን! 🙏"
+                "✅ " + get_text(lang, 'review_comment_saved')
             )
         else:
             bot.send_message(
                 message.chat.id,
-                "❌ አስተያየት መመዝገብ አልተቻለም!"
+                "❌ " + get_text(lang, 'review_comment_failed')
             )
     
     # ==================== ረዳት ተግባራት ====================
@@ -550,11 +562,17 @@ def register(bot: TeleBot, db: Database):
         stars = "⭐" * round(rating) if rating else "☆"
         
         # ስም
-        name = product['name_am'] if lang == 'am' else product['name_en']
+        name = (
+            product.get('name_am' if lang == 'am' else 'name_en')
+            or get_text(lang, 'product')
+        )
         description = product.get('description_am', '') if lang == 'am' else product.get('description_en', '')
         
         # ሁኔታ
-        status = "✅ በክምችት ላይ" if product['stock_quantity'] > 0 else "❌ ተሽጦ አልቋል"
+        status = get_text(
+            lang,
+            'in_stock' if product['stock_quantity'] > 0 else 'out_of_stock',
+        )
         
         # መልዕክት
         msg = f"🔹 *{name}*\n\n"
@@ -562,14 +580,14 @@ def register(bot: TeleBot, db: Database):
         if description:
             msg += f"📝 {description}\n\n"
         
-        msg += f"💰 *ዋጋ:* {format_currency(product['price'])}\n"
+        msg += f"💰 *{get_text(lang, 'price')}:* {format_currency(product['price'])}\n"
         
         if product.get('compare_price'):
             msg += f"~~{format_currency(product['compare_price'])}~~\n"
         
-        msg += f"📏 *መጠን:* {product['size']}\n"
-        msg += f"📦 *ሁኔታ:* {status}\n"
-        msg += f"📊 *ክምችት:* {product['stock_quantity']}\n"
+        msg += f"📏 *{get_text(lang, 'size')}:* {product.get('size') or '—'}\n"
+        msg += f"📦 *{get_text(lang, 'status')}:* {status}\n"
+        msg += f"📊 *{get_text(lang, 'stock')}:* {product['stock_quantity']}\n"
         
         if rating:
             msg += f"⭐ {stars} ({rating_count} {get_text(lang, 'reviews')})\n"
@@ -580,25 +598,25 @@ def register(bot: TeleBot, db: Database):
         if product['stock_quantity'] > 0:
             markup.add(
                 InlineKeyboardButton(
-                    "🛒 ለመግዛት",
+                    "🛒 " + get_text(lang, 'buy'),
                     callback_data=f"product_buy_{product['id']}"
                 )
             )
         
         markup.add(
             InlineKeyboardButton(
-                "⭐ ግምገማ",
+                "⭐ " + get_text(lang, 'review'),
                 callback_data=f"product_review_{product['id']}"
             ),
             InlineKeyboardButton(
-                "❤️ ወደ ተመረጡ",
+                "❤️ " + get_text(lang, 'wishlist'),
                 callback_data=f"product_wishlist_{product['id']}"
             )
         )
         
         markup.add(
             InlineKeyboardButton(
-                "🔙 ወደ ምርቶች",
+                "🔙 " + get_text(lang, 'products'),
                 callback_data=f"category_{product['category']}"
             )
         )
@@ -612,7 +630,7 @@ def register(bot: TeleBot, db: Database):
                 parse_mode='Markdown'
             )
         except Exception as e:
-            logger.error(f"ምርት ማሳየት አልተቻለም: {e}")
+            logger.error("Could not display product photo: %s", e)
             bot.send_message(
                 chat_id,
                 msg,
@@ -735,8 +753,8 @@ def register(bot: TeleBot, db: Database):
         if not query:
             bot.send_message(
                 message.chat.id,
-                "🔍 ምን መፈለግ ይፈልጋሉ? በ /search ቀጥሎ ይጻፉ\n"
-                "ለምሳሌ: /search ቀሚስ"
+                "🔍 " + get_text(lang, 'search_prompt') + "\n"
+                + get_text(lang, 'search_prompt_example')
             )
             return
         
@@ -746,7 +764,7 @@ def register(bot: TeleBot, db: Database):
         if not products:
             bot.send_message(
                 message.chat.id,
-                f"🔍 ለ '{query}' ምንም ምርት አልተገኘም"
+                "🔍 " + get_text(lang, 'search_no_results').format(query)
             )
             return
         
@@ -759,7 +777,7 @@ def register(bot: TeleBot, db: Database):
             ))
         bot.send_message(
             message.chat.id,
-            f"🔍 {'የፍለጋ ውጤቶች' if lang == 'am' else 'Search results'}",
+            "🔍 " + get_text(lang, 'search_results'),
             reply_markup=markup,
         )
     
@@ -773,8 +791,7 @@ def register(bot: TeleBot, db: Database):
         if not match:
             bot.send_message(
                 message.chat.id,
-                "❌ እባክዎ ትክክለኛ የምርት ID ያስገቡ!\n"
-                "ለምሳሌ: /product 123"
+                "❌ " + get_text(lang, 'invalid_product_id')
             )
             return
         product_id = int(match.group(1))
@@ -784,7 +801,7 @@ def register(bot: TeleBot, db: Database):
         if not product:
             bot.send_message(
                 message.chat.id,
-                "❌ ምርቱ አልተገኘም!"
+                "❌ " + get_text(lang, 'product_not_found')
             )
             return
         
@@ -814,12 +831,7 @@ def register(bot: TeleBot, db: Database):
         if not category:
             bot.send_message(
                 message.chat.id,
-                "📂 የምድብ ስም ያስገቡ!\n"
-                "ለምሳሌ: /category Men\n\n"
-                "📌 የሚገኙ ምድቦች:\n"
-                "• Men\n"
-                "• Women\n"
-                "• Accessories"
+                "📂 " + get_text(lang, 'category_name_prompt')
             )
             return
         

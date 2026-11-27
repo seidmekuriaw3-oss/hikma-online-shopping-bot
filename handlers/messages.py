@@ -164,7 +164,8 @@ def register(bot: TeleBot, db: Database):
         
         # መደበኛ የፎቶ መልዕክት
         db.log_activity(user_id, 'photo', 'ፎቶ ልኳል')
-        bot.reply_to(message, "📸 ፎቶዎ ተቀብያለሁ! በቅርቡ እንመለከተዋለን.")
+        lang = get_user_lang(db, user_id)
+        bot.reply_to(message, "📸 " + get_text(lang, 'photo_received'))
     
     # ==================== ሌሎች የመልዕክት አይነቶች ====================
     
@@ -172,13 +173,15 @@ def register(bot: TeleBot, db: Database):
     def handle_document_messages(message: Message):
         """የዶክመንት መልዕክቶች አያያዝ"""
         user_id = message.from_user.id
+        lang = get_user_lang(db, user_id)
         db.log_activity(user_id, 'document', 'ዶክመንት ልኳል')
-        bot.reply_to(message, "📄 ዶክመንትዎ ተቀብያለሁ!")
+        bot.reply_to(message, "📄 " + get_text(lang, 'document_received'))
     
     @bot.message_handler(content_types=['contact'])
     def handle_contact_messages(message: Message):
         """የእውቂያ መልዕክቶች አያያዝ"""
         user_id = message.from_user.id
+        lang = get_user_lang(db, user_id)
         contact = message.contact
         
         if contact:
@@ -189,13 +192,14 @@ def register(bot: TeleBot, db: Database):
             
             bot.reply_to(
                 message,
-                f"✅ የስልክ ቁጥርዎ {phone} ተመዝግቧል! 🙏"
+                "✅ " + get_text(lang, 'contact_received').format(phone)
             )
     
     @bot.message_handler(content_types=['location'])
     def handle_location_messages(message: Message):
         """የመገኛ መልዕክቶች አያያዝ"""
         user_id = message.from_user.id
+        lang = get_user_lang(db, user_id)
         location = message.location
         
         if location:
@@ -206,9 +210,10 @@ def register(bot: TeleBot, db: Database):
             )
             bot.reply_to(
                 message,
-                f"📍 መገኛዎ ተቀብያለሁ!\n"
-                f"🗺️ ኬክሮስ: {location.latitude}\n"
-                f"🗺️ ኬንትሮስ: {location.longitude}"
+                "📍 " + get_text(lang, 'location_received').format(
+                    location.latitude,
+                    location.longitude,
+                )
             )
     
     # ==================== ረዳት ተግባራት ====================
@@ -255,8 +260,7 @@ def register(bot: TeleBot, db: Database):
         # ነባሪ መልስ
         bot.reply_to(
             message,
-            f"❓ እባክዎ ከሜኑ አዝራሮች ይምረጡ.\n\n"
-            f"💡 እርዳታ ከፈለጉ /help ይጫኑ"
+            "❓ " + get_text(lang, 'menu_help_hint')
         )
     
     # ==================== ስህተት አያያዝ ====================
@@ -280,6 +284,5 @@ def register(bot: TeleBot, db: Database):
         
         bot.reply_to(
             message,
-            f"📨 መልዕክትዎ ተቀብያለሁ! "
-            f"በቅርቡ እንመለከተዋለን. 🙏"
+            "📨 " + get_text(lang, 'unsupported_content_received')
         )

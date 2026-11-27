@@ -152,7 +152,10 @@ def send_order_confirmation(bot: TeleBot, order_id: int, db: Database):
     msg += f"*{get_text(lang, 'order_items')}:*\n"
     for item in items:
         product = db.get_product(item['product_id'])
-        name = product['name_am'] if product else 'N/A'
+        name = (
+            product.get('name_am' if lang == 'am' else 'name_en')
+            if product else None
+        ) or get_text(lang, 'product')
         msg += f"• {name} × {item['quantity']} = {format_currency(item['total_price'])}\n"
     
     msg += f"\n💰 {get_text(lang, 'total')}: {format_currency(order['final_amount'])}\n"
@@ -160,7 +163,12 @@ def send_order_confirmation(bot: TeleBot, order_id: int, db: Database):
     if order['shipping_address']:
         msg += f"\n📍 {get_text(lang, 'shipping_address')}: {order['shipping_address']}"
     
-    msg += f"\n\n📌 {get_text(lang, 'order_status')}: {order['status']}\n"
+    status_key = str(order['status']).strip().lower()
+    status_key = 'delivered' if status_key == 'completed' else status_key
+    status_text = get_text(lang, status_key)
+    if status_text == status_key:
+        status_text = str(order['status'])
+    msg += f"\n\n📌 {get_text(lang, 'order_status')}: {status_text}\n"
     msg += "የትዕዛዞችዎን ለማየት ከታች ይጫኑ።" if lang == 'am' else "View your orders using the button below."
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton(
@@ -202,7 +210,11 @@ def send_payment_confirmation(bot: TeleBot, payment_id: int, db: Database):
     msg += f"💳 {format_payment_method(payment.get('method'), lang)}\n"
     msg += f"🔢 {get_text(lang, 'transaction_id')}: {payment['transaction_id']}\n"
     msg += f"📅 {get_text(lang, 'date')}: {payment['completed_at'] or payment['created_at']}\n\n"
-    msg += f"📌 {get_text(lang, 'payment_status')}: {payment['status']}"
+    payment_status_key = str(payment['status']).strip().lower()
+    payment_status = get_text(lang, payment_status_key)
+    if payment_status == payment_status_key:
+        payment_status = str(payment['status'])
+    msg += f"📌 {get_text(lang, 'payment_status')}: {payment_status}"
     
     try:
         bot.send_message(
@@ -262,7 +274,10 @@ def send_product_notification(bot: TeleBot, product_id: int, db: Database):
     for i, user in enumerate(subscribers):
         try:
             lang = user.get('lang', 'am')
-            name = product['name_am'] if lang == 'am' else product['name_en']
+            name = (
+                product.get('name_am' if lang == 'am' else 'name_en')
+                or get_text(lang, 'product')
+            )
             
             msg = f"🆕 *{get_text(lang, 'new_product')}*\n\n"
             msg += f"📦 {name}\n"
@@ -320,7 +335,12 @@ def send_order_update(bot: TeleBot, order_id: int, db: Database):
     
     msg = f"{status_emoji} *{get_text(lang, 'order_update')}*\n\n"
     msg += f"🔢 {get_text(lang, 'order_number')}: {order['order_number']}\n"
-    msg += f"📦 {get_text(lang, 'status')}: {order['status']}\n"
+    status_key = str(order['status']).strip().lower()
+    status_key = 'delivered' if status_key == 'completed' else status_key
+    status_text = get_text(lang, status_key)
+    if status_text == status_key:
+        status_text = str(order['status'])
+    msg += f"📦 {get_text(lang, 'status')}: {status_text}\n"
     msg += f"📅 {get_text(lang, 'updated')}: {order['updated_at']}\n\n"
     
     if order['status'] == 'Shipped':

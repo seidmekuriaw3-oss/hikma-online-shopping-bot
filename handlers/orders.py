@@ -101,8 +101,8 @@ def register(bot: TeleBot, db: Database):
                 product = db.get_product(item.get('product_id'))
                 name = (
                     (product.get('name_am') if lang == 'am' else product.get('name_en'))
-                    if product else item.get('name')
-                ) or item.get('name') or ("ምርት" if lang == 'am' else "Product")
+                    if product else None
+                ) or get_text(lang, 'product')
                 lines.append(f"• {name} × {quantity} · {format_currency(line_total)}")
                 markup.row(
                     InlineKeyboardButton("➖", callback_data=f"cart_dec_{item['product_id']}"),
@@ -169,7 +169,7 @@ def register(bot: TeleBot, db: Database):
         items = _cart_items(cart)
         item = next((entry for entry in items if entry.get('product_id') == product_id), None)
         if not item:
-            bot.answer_callback_query(call.id, "Cart item no longer exists")
+            bot.answer_callback_query(call.id, get_text(lang, 'cart_item_missing'))
             show_cart(
                 call.message, db, bot,
                 message_id=call.message.message_id,
@@ -183,7 +183,9 @@ def register(bot: TeleBot, db: Database):
             if not product or quantity >= int(product.get('stock_quantity', 0)):
                 bot.answer_callback_query(
                     call.id,
-                    "Кምችት የለም" if lang == 'am' else "No more stock available",
+                    get_text(lang, 'not_enough_stock').format(
+                        product.get('stock_quantity', 0) if product else 0
+                    ),
                     show_alert=True,
                 )
                 return
@@ -215,7 +217,10 @@ def register(bot: TeleBot, db: Database):
         lang = get_user_lang(db, user_id)
         
         db.clear_cart(user_id)
-        bot.answer_callback_query(call.id, "✅ ጋሪዎ ተጽድቷል!")
+        bot.answer_callback_query(
+            call.id,
+            "✅ " + get_text(lang, 'cart_cleared'),
+        )
         
         show_cart(
             call.message, db, bot,
@@ -233,7 +238,7 @@ def register(bot: TeleBot, db: Database):
         
         msg = bot.send_message(
             call.message.chat.id,
-            "🏷️ የቅናሽ ኮዱን ያስገቡ:"
+            "🏷️ " + get_text(lang, 'discount_code_prompt')
         )
         bot.register_next_step_handler(msg, process_discount_code, db, bot)
         bot.answer_callback_query(call.id)
@@ -250,7 +255,7 @@ def register(bot: TeleBot, db: Database):
         if not discount:
             bot.send_message(
                 message.chat.id,
-                "❌ የቅናሽ ኮዱ ልክ አይደለም ወይም ጊዜው አልፏል!"
+                "❌ " + get_text(lang, 'invalid_discount_code')
             )
             return
         
@@ -265,7 +270,7 @@ def register(bot: TeleBot, db: Database):
             if usage_count >= discount['user_limit']:
                 bot.send_message(
                     message.chat.id,
-                    "❌ ይህን ቅናሽ ከፍተኛውን ጊዜ ተጠቅመዋል!"
+                    "❌ " + get_text(lang, 'discount_limit_reached')
                 )
                 return
         
@@ -275,7 +280,7 @@ def register(bot: TeleBot, db: Database):
         if not cart or not cart.get('items'):
             bot.send_message(
                 message.chat.id,
-                "❌ ጋሪዎ ባዶ ነው!"
+                "❌ " + get_text(lang, 'empty_cart')
             )
             return
         
@@ -286,7 +291,9 @@ def register(bot: TeleBot, db: Database):
         if discount['min_order_amount'] > 0 and total < discount['min_order_amount']:
             bot.send_message(
                 message.chat.id,
-                f"❌ ይህን ቅናሽ ለመጠቀም ቢያንስ {format_currency(discount['min_order_amount'])} መግዛት አለብዎት!"
+                "❌ " + get_text(lang, 'discount_minimum_order').format(
+                    format_currency(discount['min_order_amount'])
+                )
             )
             return
         
@@ -304,11 +311,11 @@ def register(bot: TeleBot, db: Database):
         
         bot.send_message(
             message.chat.id,
-            f"✅ ቅናሽ ተተግብሯል!\n\n"
-            f"🏷️ ኮድ: {code}\n"
-            f"📊 ቅናሽ: {discount['discount_percent']}%\n"
-            f"💰 ቅናሽ መጠን: {format_currency(discount_amount)}\n"
-            f"💰 የተጣራ: {format_currency(final_amount)}"
+            f"✅ {get_text(lang, 'discount_applied')}\n\n"
+            f"🏷️ {get_text(lang, 'discount_code')}: {code}\n"
+            f"📊 {get_text(lang, 'discount')}: {discount['discount_percent']}%\n"
+            f"💰 {get_text(lang, 'discount_amount')}: {format_currency(discount_amount)}\n"
+            f"💰 {get_text(lang, 'net_total')}: {format_currency(final_amount)}"
         )
         
         # ጋሪ ማሳየት
@@ -412,7 +419,8 @@ def register(bot: TeleBot, db: Database):
     def handle_checkout_phone_edit(call):
         state = order_states.get(call.from_user.id)
         if not state:
-            bot.answer_callback_query(call.id, "Checkout expired. Please start again.")
+            lang = get_user_lang(db, call.from_user.id)
+            bot.answer_callback_query(call.id, get_text(lang, 'checkout_expired'))
             return
         state['step'] = 'phone'
         _prompt_checkout_phone(call.message.chat.id, get_user_lang(db, call.from_user.id))
@@ -424,7 +432,10 @@ def register(bot: TeleBot, db: Database):
         lang = get_user_lang(db, user_id)
         state = order_states.get(user_id)
         if not state or state.get('step') != 'phone_confirm':
-            bot.answer_callback_query(call.id, "Checkout expired. Please start again.")
+            bot.answer_callback_query(
+                call.id,
+                get_text(lang, 'checkout_expired'),
+            )
             return
         state['step'] = 'address'
         _prompt_checkout_address(call.message.chat.id, lang)
@@ -484,7 +495,13 @@ def register(bot: TeleBot, db: Database):
     def handle_checkout_address_edit(call):
         state = order_states.get(call.from_user.id)
         if not state:
-            bot.answer_callback_query(call.id, "Checkout expired. Please start again.")
+            bot.answer_callback_query(
+                call.id,
+                get_text(
+                    get_user_lang(db, call.from_user.id),
+                    'checkout_expired',
+                ),
+            )
             return
         state['step'] = 'address'
         _prompt_checkout_address(call.message.chat.id, get_user_lang(db, call.from_user.id))
@@ -496,7 +513,7 @@ def register(bot: TeleBot, db: Database):
         lang = get_user_lang(db, user_id)
         state = order_states.get(user_id)
         if not state or state.get('step') != 'address_confirm':
-            bot.answer_callback_query(call.id, "Checkout expired. Please start again.")
+            bot.answer_callback_query(call.id, get_text(lang, 'checkout_expired'))
             return
         state['step'] = 'payment'
         bot.send_message(
@@ -509,10 +526,11 @@ def register(bot: TeleBot, db: Database):
     @bot.callback_query_handler(func=lambda call: call.data == 'checkout_cancel')
     def handle_checkout_cancel(call):
         order_states.pop(call.from_user.id, None)
-        bot.answer_callback_query(call.id, "Checkout cancelled")
+        lang = get_user_lang(db, call.from_user.id)
+        bot.answer_callback_query(call.id, get_text(lang, 'checkout_cancelled'))
         bot.send_message(
             call.message.chat.id,
-            "የግዢ ሂደቱ ተሰርዟል።" if get_user_lang(db, call.from_user.id) == 'am' else "Checkout cancelled.",
+            get_text(lang, 'checkout_cancelled'),
         )
     
     # ==================== ክፍያ ማስኬድ ====================
@@ -529,7 +547,10 @@ def register(bot: TeleBot, db: Database):
         state = order_states.get(user_id)
         
         if not state or state.get('step') != 'payment':
-            bot.answer_callback_query(call.id, "❌ የግዢ ሂደት ተቋርጧል!")
+            bot.answer_callback_query(
+                call.id,
+                "❌ " + get_text(lang, 'checkout_expired'),
+            )
             return
         
         # ትዕዛዝ መፍጠር
@@ -558,7 +579,7 @@ def register(bot: TeleBot, db: Database):
         if not order_id:
             bot.send_message(
                 call.message.chat.id,
-                "❌ ትዕዛዙ መፍጠር አልተቻለም!"
+                "❌ " + get_text(lang, 'order_create_failed')
             )
             return
         
@@ -704,47 +725,69 @@ def register(bot: TeleBot, db: Database):
         order = db.get_order(order_id)
         
         if not order:
-            bot.answer_callback_query(call.id, "❌ ትዕዛዙ አልተገኘም!")
+            bot.answer_callback_query(
+                call.id,
+                "❌ " + get_text(lang, 'order_not_found'),
+            )
             return
         
         # ተጠቃሚው የራሱ ትዕዛዝ መሆኑን ማረጋገጥ
         if order['user_id'] != user_id and user_id not in db.get_admin_ids():
-            bot.answer_callback_query(call.id, "⛔ ፈቃድ የለዎትም!")
+            bot.answer_callback_query(
+                call.id,
+                "⛔ " + get_text(lang, 'not_admin'),
+            )
             return
         
         items = db.get_order_items(order_id)
         
-        msg = f"📋 *የትዕዛዝ ዝርዝር*\n\n"
-        msg += f"🔢 *ቁጥር:* {order['order_number']}\n"
-        msg += f"📅 *ቀን:* {order['order_date']}\n"
-        msg += f"📦 *ሁኔታ:* {order['status']}\n"
-        msg += f"💳 *ክፍያ:* {order['payment_method']} - {order['payment_status']}\n\n"
+        status_key = str(order['status']).strip().lower()
+        status_key = 'delivered' if status_key == 'completed' else status_key
+        status_text = get_text(lang, status_key)
+        if status_text == status_key:
+            status_text = str(order['status'])
+        payment_status_key = str(order['payment_status']).strip().lower()
+        payment_status_text = get_text(lang, payment_status_key)
+        if payment_status_text == payment_status_key:
+            payment_status_text = str(order['payment_status'])
+        msg = f"📋 *{get_text(lang, 'order_details')}*\n\n"
+        msg += f"🔢 *{get_text(lang, 'order_number')}:* {order['order_number']}\n"
+        msg += f"📅 *{get_text(lang, 'date')}:* {order['order_date']}\n"
+        msg += f"📦 *{get_text(lang, 'status')}:* {status_text}\n"
+        msg += (
+            f"💳 *{get_text(lang, 'method')}:* "
+            f"{format_payment_method(order['payment_method'], lang)} - "
+            f"{payment_status_text}\n\n"
+        )
         
-        msg += "*📦 ምርቶች:*\n"
+        msg += f"*📦 {get_text(lang, 'order_items')}:*\n"
         for item in items:
             product = db.get_product(item['product_id'])
-            name = product['name_am'] if product else 'N/A'
+            name = (
+                product.get('name_am' if lang == 'am' else 'name_en')
+                if product else None
+            ) or get_text(lang, 'product')
             msg += f"  • {name} × {item['quantity']} = {format_currency(item['total_price'])}\n"
         
-        msg += f"\n💰 *ጠቅላላ:* {format_currency(order['total_amount'])}\n"
+        msg += f"\n💰 *{get_text(lang, 'total')}:* {format_currency(order['total_amount'])}\n"
         
         if order['discount_amount'] > 0:
-            msg += f"🏷️ *ቅናሽ:* -{format_currency(order['discount_amount'])}\n"
+            msg += f"🏷️ *{get_text(lang, 'discount')}:* -{format_currency(order['discount_amount'])}\n"
         
-        msg += f"💰 *የተጣራ:* {format_currency(order['final_amount'])}\n"
+        msg += f"💰 *{get_text(lang, 'net_total')}:* {format_currency(order['final_amount'])}\n"
         
         if order['shipping_address']:
-            msg += f"\n📍 *አድራሻ:* {order['shipping_address']}"
+            msg += f"\n📍 *{get_text(lang, 'shipping_address')}:* {order['shipping_address']}"
         
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(InlineKeyboardButton(
-            "🔙 ወደ ትዕዛዞች" if lang == 'am' else "🔙 My Orders",
+            "🔙 " + get_text(lang, 'view_orders'),
             callback_data="back_to_orders",
         ))
         from config import config
         if config.bot.ADMIN_USERNAME:
             markup.add(InlineKeyboardButton(
-                "💬 አስተዳዳሪን ያግኙ" if lang == 'am' else "💬 Contact support",
+                "💬 " + get_text(lang, 'contact_support'),
                 url=f"https://t.me/{config.bot.ADMIN_USERNAME}",
             ))
         
@@ -775,11 +818,18 @@ def register(bot: TeleBot, db: Database):
         user_id = call.from_user.id
         lang = get_user_lang(db, user_id)
         if user_id not in db.get_admin_ids():
-            bot.answer_callback_query(call.id, "⛔ ፈቃድ የለዎትም!")
+            bot.answer_callback_query(
+                call.id,
+                "⛔ " + get_text(lang, 'not_admin'),
+            )
             return
         parts = call.data.split('_')
         if len(parts) < 4 or not parts[3].isdigit():
-            bot.answer_callback_query(call.id, "Invalid order action", show_alert=True)
+            bot.answer_callback_query(
+                call.id,
+                get_text(lang, 'invalid_order_action'),
+                show_alert=True,
+            )
             return
         action = parts[2]
         order_id = int(parts[3])
@@ -796,10 +846,18 @@ def register(bot: TeleBot, db: Database):
             if new_status:
                 status = allowed_statuses.get(new_status)
                 if not status:
-                    bot.answer_callback_query(call.id, "Invalid order status", show_alert=True)
+                    bot.answer_callback_query(
+                        call.id,
+                        get_text(lang, 'invalid_order_status'),
+                        show_alert=True,
+                    )
                     return
                 if not db.update_order_status(order_id, status):
-                    bot.answer_callback_query(call.id, "Could not update order status", show_alert=True)
+                    bot.answer_callback_query(
+                        call.id,
+                        get_text(lang, 'order_status_update_failed'),
+                        show_alert=True,
+                    )
                     return
 
                 order = db.get_order(order_id)
@@ -826,35 +884,33 @@ def register(bot: TeleBot, db: Database):
                         logger.exception("Could not refresh admin order card after status update")
                         bot.send_message(call.message.chat.id, text, reply_markup=keyboard)
 
-                    status_text = {
-                        'Processing': ('🔄 በሂደት ላይ', '🔄 Processing'),
-                        'Shipped': ('🚚 ተልኳል', '🚚 Shipped'),
-                        'Delivered': ('✔️ ተጠናቋል', '✔️ Completed'),
-                        'Cancelled': ('❌ ተሰርዟል', '❌ Cancelled'),
-                    }[status][0 if get_user_lang(db, int(order['user_id'])) == 'am' else 1]
+                    customer_lang = get_user_lang(db, int(order['user_id']))
+                    status_key = 'delivered' if status == 'Delivered' else status.lower()
+                    status_text = get_text(customer_lang, status_key)
                     notification = (
-                        f"📋 *የትዕዛዝ ሁኔታ ተዘምኗል!*\n\n"
+                        f"📋 *{get_text(customer_lang, 'order_status_updated')}*\n\n"
                         f"🔢 {order['order_number']}\n📦 {status_text}\n\n"
-                        "የትዕዛዝዎን ለማየት ከታች ያለውን ይጫኑ።"
-                        if get_user_lang(db, int(order['user_id'])) == 'am'
-                        else f"📋 *Your order status was updated.*\n\n"
-                        f"🔢 {order['order_number']}\n📦 {status_text}\n\n"
-                        "Use the button below to view your orders."
+                        f"{get_text(customer_lang, 'view_orders_hint')}"
                     )
                     keyboard = InlineKeyboardMarkup()
                     keyboard.add(InlineKeyboardButton(
-                        "📋 ትዕዛዞቼን እይ"
-                        if get_user_lang(db, int(order['user_id'])) == 'am'
-                        else "📋 View My Orders",
+                        "📋 " + get_text(customer_lang, 'view_orders'),
                         callback_data="view_orders",
                     ))
                     bot.send_message(order['user_id'], notification, reply_markup=keyboard, parse_mode='Markdown')
-                bot.answer_callback_query(call.id, "✅ Status updated")
+                bot.answer_callback_query(
+                    call.id,
+                    "✅ " + get_text(lang, 'status_updated'),
+                )
                 return
 
             order = db.get_order(order_id)
             if not order:
-                bot.answer_callback_query(call.id, "Order not found", show_alert=True)
+                bot.answer_callback_query(
+                    call.id,
+                    get_text(lang, 'order_not_found'),
+                    show_alert=True,
+                )
                 return
             order['items'] = db.get_order_items(order_id)
             customer = db.get_user(order['user_id']) or {}
@@ -871,7 +927,10 @@ def register(bot: TeleBot, db: Database):
         elif action == 'view':
             order = db.get_order(order_id)
             if not order:
-                bot.answer_callback_query(call.id, "❌ ትዕዛዙ አልተገኘም!")
+                bot.answer_callback_query(
+                    call.id,
+                    "❌ " + get_text(lang, 'order_not_found'),
+                )
                 return
             order['items'] = db.get_order_items(order_id)
             customer = db.get_user(order['user_id']) or {}

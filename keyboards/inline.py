@@ -103,8 +103,19 @@ def get_admin_product_category_keyboard(lang: str = 'am') -> InlineKeyboardMarku
 
 
 def get_start_keyboard(lang: str = 'am') -> InlineKeyboardMarkup:
-    """የመጀመሪያ ማስተዋወቂያ ኪቦርድ መፍጠር"""
-    return get_main_keyboard(lang)
+    """Build the welcome message's quick-start actions."""
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.row(
+        InlineKeyboardButton(
+            "🛍️ ሱቁን ይጎብኙ" if lang == 'am' else "🛍️ Browse Shop",
+            callback_data="browse_categories",
+        ),
+        InlineKeyboardButton(
+            "🌐 ቋንቋ" if lang == 'am' else "🌐 Language",
+            callback_data="change_language",
+        ),
+    )
+    return markup
 
 
 def get_back_keyboard(callback_data: str = "main_menu", lang: str = 'am') -> InlineKeyboardMarkup:

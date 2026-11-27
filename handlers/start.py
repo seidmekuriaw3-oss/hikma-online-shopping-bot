@@ -6,12 +6,15 @@ Hikma Online Shopping Bot - የመጀመሪያ ሜኑ እጅ አያያዝ
 """
 
 import logging
+import html
 from typing import Optional
 from datetime import datetime
+from pathlib import Path
 
 from telebot import TeleBot
 from telebot.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
+from config import BASE_DIR, config
 from database import Database
 from utils.helpers import get_text, get_lang, get_user_lang
 from keyboards.reply import get_main_menu, get_language_menu
@@ -22,15 +25,71 @@ logger = logging.getLogger(__name__)
 
 
 def show_welcome(chat_id: int, user_id: int, db: Database, bot: TeleBot):
-    """Send the localized welcome message and main menu."""
+    """Send the branded welcome photo and localized customer menus."""
     lang = get_user_lang(db, user_id)
     user = db.get_user(user_id)
-    welcome_msg = get_text(lang, 'welcome_msg')
-    first_name = user['first_name'] if user else 'ደንበኛ'
-    msg = f"👋 እንኳን ደህና መጡ {first_name}!\n\n"
-    msg += f"{welcome_msg}\n\n"
-    msg += "📌 ከታች ካሉት አዝራሮች ይምረጡ:"
-    bot.send_message(chat_id, msg, reply_markup=get_main_menu(user_id, db))
+    first_name = (user or {}).get('first_name') or get_text(
+        lang, 'customer_name'
+    )
+    caption = (
+        f"<b>Hikma Online Shopping</b>\n"
+        f"👋 {get_text(lang, 'welcome_greeting')} "
+        f"{html.escape(first_name).replace('*', '&#42;')}!\n\n"
+        f"{get_text(lang, 'welcome_intro')}\n\n"
+        f"⚡ {get_text(lang, 'welcome_fast_delivery')}\n"
+        f"🔒 {get_text(lang, 'welcome_secure_payment')}\n"
+        f"✨ {get_text(lang, 'welcome_quality')}\n\n"
+        f"{get_text(lang, 'quick_start_hint')}"
+    )
+    quick_actions = get_start_keyboard(lang)
+    configured_photo = (
+        config.bot.WELCOME_BANNER_FILE_ID
+        or config.bot.WELCOME_BANNER_URL
+    )
+    local_banner = BASE_DIR / 'assets' / 'welcome_banner.png'
+    photo_sent = False
+
+    if configured_photo:
+        try:
+            bot.send_photo(
+                chat_id,
+                configured_photo,
+                caption=caption,
+                parse_mode='HTML',
+                reply_markup=quick_actions,
+            )
+            photo_sent = True
+        except Exception:
+            logger.exception("Configured welcome banner could not be sent")
+
+    if not photo_sent and local_banner.is_file():
+        try:
+            with local_banner.open('rb') as photo:
+                bot.send_photo(
+                    chat_id,
+                    photo,
+                    caption=caption,
+                    parse_mode='HTML',
+                    reply_markup=quick_actions,
+                )
+            photo_sent = True
+        except Exception:
+            logger.exception("Local welcome banner could not be sent")
+
+    if not photo_sent:
+        logger.error("No welcome banner could be sent; using text welcome")
+        bot.send_message(
+            chat_id,
+            caption,
+            parse_mode='HTML',
+            reply_markup=quick_actions,
+        )
+
+    bot.send_message(
+        chat_id,
+        get_text(lang, 'main_menu_hint'),
+        reply_markup=get_main_menu(user_id, db),
+    )
 
 
 def register(bot: TeleBot, db: Database):
@@ -90,8 +149,13 @@ def register(bot: TeleBot, db: Database):
             markup = get_language_menu()
             bot.send_message(
                 message.chat.id,
-                "👋 እንኳን ደህና መጡ!\n\n"
-                "ቋንቋ ይምረጡ / Choose Language:",
+                "👋 " + get_text(
+                    config.language.DEFAULT_LANGUAGE,
+                    'welcome',
+                ) + "\n\n" + get_text(
+                    config.language.DEFAULT_LANGUAGE,
+                    'choose_language',
+                ),
                 reply_markup=markup
             )
         else:
@@ -153,9 +217,10 @@ def register(bot: TeleBot, db: Database):
 
     @bot.message_handler(commands=['lang'])
     def language_command(message: Message):
+        lang = get_user_lang(db, message.from_user.id)
         bot.send_message(
             message.chat.id,
-            "🌍 ቋንቋ ይምረጡ / Choose Language:",
+            "🌍 " + get_text(lang, 'choose_language'),
             reply_markup=get_language_menu()
         )
 

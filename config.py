@@ -27,6 +27,8 @@ class BotConfig:
     # ቶከን
     TOKEN: str = os.getenv('BOT_TOKEN', '')
     ADMIN_USERNAME: str = os.getenv('ADMIN_USERNAME', '').strip().lstrip('@')
+    WELCOME_BANNER_URL: str = os.getenv('WELCOME_BANNER_URL', '').strip()
+    WELCOME_BANNER_FILE_ID: str = os.getenv('WELCOME_BANNER_FILE_ID', '').strip()
     
     # አስተዳዳሪዎች
     ADMIN_IDS: List[int] = field(default_factory=lambda: [
