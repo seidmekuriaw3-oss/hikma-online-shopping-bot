@@ -26,13 +26,22 @@ class BotConfig:
     
     # ቶከን
     TOKEN: str = os.getenv('BOT_TOKEN', '')
-    ADMIN_USERNAME: str = os.getenv('ADMIN_USERNAME', '').strip().lstrip('@')
+    ADMIN_USERNAME: str = field(
+        default_factory=lambda: (
+            os.getenv('ADMIN_USERNAME', '').strip().lstrip('@').strip()
+        )
+    )
+    SUPPORT_PHONE: str = field(
+        default_factory=lambda: os.getenv('SUPPORT_PHONE', '').strip()
+    )
     WELCOME_BANNER_URL: str = os.getenv('WELCOME_BANNER_URL', '').strip()
     WELCOME_BANNER_FILE_ID: str = os.getenv('WELCOME_BANNER_FILE_ID', '').strip()
     
     # አስተዳዳሪዎች
     ADMIN_IDS: List[int] = field(default_factory=lambda: [
-        int(id) for id in os.getenv('ADMIN_IDS', '').split(',') if id
+        int(admin_id.strip())
+        for admin_id in os.getenv('ADMIN_IDS', '').split(',')
+        if admin_id.strip()
     ])
     
     # የቦት ስም

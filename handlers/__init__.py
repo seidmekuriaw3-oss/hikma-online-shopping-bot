@@ -136,11 +136,15 @@ def show_admin_panel(message: Message, db: Database, bot: TeleBot):
 
 def register_handlers(bot: TeleBot, db: Database):
     """Package-level API expected by main.py."""
-    from handlers import start, products, orders, payments, user, admin, callback
+    from handlers import (
+        start, support, products, orders, payments, user, admin, callback,
+    )
 
     guarded_bot = _DatabaseErrorReportingBot(bot, db)
     # Register specific handlers before messages.py's catch-all text handler.
-    for module in (start, products, orders, payments, user, admin, callback):
+    for module in (
+        support, start, products, orders, payments, user, admin, callback,
+    ):
         module.register(guarded_bot, db)
     start.register_additional_commands(guarded_bot, db)
     register(guarded_bot, db)

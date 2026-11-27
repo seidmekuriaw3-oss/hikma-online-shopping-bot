@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from telebot import TeleBot
-from telebot.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from telebot.types import Message, CallbackQuery
 
 from config import BASE_DIR, config
 from database import Database
@@ -20,6 +20,7 @@ from utils.helpers import get_text, get_lang, get_user_lang
 from keyboards.reply import get_main_menu, get_language_menu
 from keyboards.inline import get_start_keyboard
 from services.notifications import notify_admin
+from handlers.support import clear_support_state, show_help_center
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +122,7 @@ def register(bot: TeleBot, db: Database):
     def start_command(message: Message):
         """የ /start ትዕዛዝ አያያዝ"""
         user_id = message.from_user.id
+        clear_support_state(user_id)
         username = message.from_user.username
         first_name = message.from_user.first_name
         last_name = message.from_user.last_name
@@ -213,27 +215,14 @@ def register(bot: TeleBot, db: Database):
     def menu_command(message: Message):
         """የ /menu ትዕዛዝ - ዋና ሜኑ ማሳየት"""
         user_id = message.from_user.id
+        clear_support_state(user_id)
         show_welcome(message.chat.id, user_id, db, bot)
     
     @bot.message_handler(commands=['help'])
     def help_command(message: Message):
         """የ /help ትዕዛዝ - እርዳታ ማሳየት"""
         user_id = message.from_user.id
-        lang = get_user_lang(db, user_id)
-        
-        help_text = get_text(lang, 'help_text')
-        
-        markup = InlineKeyboardMarkup()
-        markup.add(
-            InlineKeyboardButton("🔙 " + get_text(lang, 'back'), callback_data="main_menu")
-        )
-        
-        bot.send_message(
-            message.chat.id,
-            help_text,
-            reply_markup=markup,
-            parse_mode='Markdown'
-        )
+        show_help_center(message.chat.id, user_id, db, bot)
 
     @bot.message_handler(
         func=lambda message: _matches_menu_keywords(
@@ -276,6 +265,7 @@ def register(bot: TeleBot, db: Database):
     def handle_main_menu(call: CallbackQuery):
         """ወደ ዋና ሜኑ መመለስ"""
         user_id = call.from_user.id
+        clear_support_state(user_id)
         
         try:
             bot.delete_message(call.message.chat.id, call.message.message_id)

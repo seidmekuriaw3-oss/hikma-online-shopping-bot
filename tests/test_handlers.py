@@ -5,14 +5,15 @@ from types import SimpleNamespace
 
 import psycopg2
 
-from config import config
+from config import BotConfig, config
 from handlers import (
-    _DatabaseErrorReportingBot, admin, messages, orders, products,
+    _DatabaseErrorReportingBot, admin, messages, orders, products, support,
     register_handlers, start, user,
 )
 from keyboards.inline import (
     get_admin_keyboard, get_admin_product_category_keyboard,
-    get_main_keyboard, get_payment_keyboard, get_product_keyboard, get_social_keyboard,
+    get_back_keyboard, get_main_keyboard, get_payment_keyboard,
+    get_product_keyboard, get_social_keyboard,
     get_start_keyboard,
     get_storefront_categories_keyboard,
 )
@@ -1431,7 +1432,7 @@ def test_help_keywords_route_before_product_search_regardless_of_language():
         assert matching[0][1].__name__ == 'help_text_command'
         assert matching[0][0] < catchall_index
         matching[0][1](message)
-        assert bot.messages[-1][1] == 'Use the menu buttons to browse products, manage your cart, and view your orders. Contact support if you need help.'
+        assert bot.messages[-1][1].startswith('🛍️ Help Center')
 
 
 def test_main_menu_keywords_route_before_product_search(monkeypatch):
@@ -1462,6 +1463,326 @@ def test_main_menu_keywords_route_before_product_search(monkeypatch):
     assert len(shown) == 4
 
 
+def test_support_config_values_are_normalized(monkeypatch):
+    monkeypatch.setenv('ADMIN_USERNAME', '  @@hikma_help  ')
+    monkeypatch.setenv('ADMIN_IDS', ' 12, , 34 ')
+    monkeypatch.setenv('SUPPORT_PHONE', ' +251900000000 ')
+
+    bot_config = BotConfig()
+
+    assert bot_config.ADMIN_USERNAME == 'hikma_help'
+    assert bot_config.ADMIN_IDS == [12, 34]
+    assert bot_config.SUPPORT_PHONE == '+251900000000'
+
+
+def test_help_center_has_localized_faq_buttons_and_optional_direct_chat(monkeypatch):
+    monkeypatch.setattr(config.bot, 'ADMIN_USERNAME', 'hikma_help')
+    monkeypatch.setattr(config.bot, 'SUPPORT_PHONE', '+251900000000')
+    db = SimpleNamespace(get_user=lambda _user_id: {'lang': 'am'})
+    bot = RecordingBot()
+    start.register(bot, db)
+    help_handler = next(
+        handler
+        for filters, handler in bot.message_handlers
+        if filters.get('commands') == ['help']
+    )
+
+    help_handler(SimpleNamespace(
+        text='/help',
+        from_user=SimpleNamespace(id=42),
+        chat=SimpleNamespace(id=42),
+    ))
+
+    help_text = bot.messages[-1][1]
+    markup = bot.message_options[-1]['reply_markup']
+    assert '@hikma_help' in help_text
+    assert '+251900000000' in help_text
+    assert [
+        [button.callback_data or button.url for button in row]
+        for row in markup.keyboard
+    ] == [
+        ['support:ask'],
+        ['faq:order', 'faq:payment'],
+        ['faq:delivery', 'https://t.me/hikma_help'],
+    ]
+
+    monkeypatch.setattr(config.bot, 'ADMIN_USERNAME', '')
+    keyboard = support.get_help_center_keyboard('en')
+    assert [
+        button.url
+        for row in keyboard.keyboard
+        for button in row
+        if button.url
+    ] == []
+    assert [button.callback_data for button in keyboard.keyboard[-1]] == [
+        'faq:delivery'
+    ]
+
+
+def test_faq_callbacks_edit_answer_with_back_to_help_button():
+    db = SimpleNamespace(get_user=lambda _user_id: {'lang': 'en'})
+    bot = RecordingBot()
+    support.register(bot, db)
+
+    for callback_data, expected in (
+        ('faq:order', 'Browse products by category'),
+        ('faq:payment', 'Telebirr, CBE, or Chapa'),
+        ('faq:delivery', 'accurate delivery address'),
+    ):
+        call = SimpleNamespace(
+            id=f'callback-{callback_data}',
+            data=callback_data,
+            from_user=SimpleNamespace(id=42),
+            message=SimpleNamespace(
+                chat=SimpleNamespace(id=42),
+                message_id=1,
+            ),
+        )
+        handler = next(
+            handler for filters, handler in bot.callback_handlers
+            if filters['func'](call)
+        )
+        handler(call)
+        assert expected in bot.edits[-1][1]
+        back_button = bot.edits[-1][4]['reply_markup'].keyboard[0][0]
+        assert back_button.callback_data == 'support:help_home'
+
+    home_call = SimpleNamespace(
+        id='callback-help-home',
+        data='support:help_home',
+        from_user=SimpleNamespace(id=42),
+        message=SimpleNamespace(
+            chat=SimpleNamespace(id=42),
+            message_id=1,
+        ),
+    )
+    home_handler = next(
+        handler for filters, handler in bot.callback_handlers
+        if filters['func'](home_call)
+    )
+    home_handler(home_call)
+    assert 'Help Center' in bot.edits[-1][1]
+    assert bot.edits[-1][4]['reply_markup'].keyboard[0][0].callback_data == (
+        'support:ask'
+    )
+
+
+def test_support_ticket_is_sent_to_all_admins_and_clears_waiting_state(monkeypatch):
+    monkeypatch.setattr(config.bot, 'ADMIN_IDS', [100, 200])
+    support.awaiting_support_message.clear()
+    db = SimpleNamespace(
+        get_user=lambda _user_id: {'lang': 'en'},
+        log_activity=lambda *_args: None,
+    )
+    bot = RecordingBot()
+    register_handlers(bot, db)
+    support_handler_index = next(
+        index
+        for index, (_, handler) in enumerate(bot.message_handlers)
+        if handler.__name__ == 'submit_text_ticket'
+    )
+    fallback_index = next(
+        index
+        for index, (filters, _) in enumerate(bot.message_handlers)
+        if filters.get('content_types') == ['text']
+        and filters.get('func')
+        and filters['func'](SimpleNamespace(
+            text='ordinary message',
+            from_user=SimpleNamespace(id=88),
+        ))
+    )
+    assert support_handler_index < fallback_index
+    user_id = 42
+    ask_call = SimpleNamespace(
+        id='ask-support',
+        data='support:ask',
+        from_user=SimpleNamespace(id=user_id),
+        message=SimpleNamespace(chat=SimpleNamespace(id=user_id)),
+    )
+    ask_handler = next(
+        handler for filters, handler in bot.callback_handlers
+        if filters['func'](ask_call)
+    )
+    ask_handler(ask_call)
+    assert user_id in support.awaiting_support_message
+    cancel_markup = bot.message_options[-1]['reply_markup']
+    assert cancel_markup.keyboard[0][0]['text'] == '❌ Cancel'
+
+    message = SimpleNamespace(
+        text='My order has not arrived.',
+        content_type='text',
+        from_user=SimpleNamespace(
+            id=user_id,
+            first_name='Aster',
+            last_name='Customer',
+            username='aster',
+        ),
+        chat=SimpleNamespace(id=user_id),
+    )
+    submit_handler = next(
+        handler for filters, handler in bot.message_handlers
+        if filters.get('content_types') == ['text']
+        and filters.get('func')
+        and filters['func'](message)
+    )
+    submit_handler(message)
+
+    tickets = [text for chat_id, text in bot.messages if chat_id in (100, 200)]
+    assert len(tickets) == 2
+    assert all('User ID: 42' in ticket for ticket in tickets)
+    assert all('Customer Name: Aster Customer' in ticket for ticket in tickets)
+    assert all('@aster' in ticket for ticket in tickets)
+    assert all('My order has not arrived.' in ticket for ticket in tickets)
+    assert user_id not in support.awaiting_support_message
+    assert bot.messages[-1][1].startswith('✅ Your message has been sent')
+
+
+def test_support_photo_caption_is_in_ticket_and_photo_reaches_admin(monkeypatch):
+    monkeypatch.setattr(config.bot, 'ADMIN_IDS', [100])
+    support.awaiting_support_message.clear()
+    db = SimpleNamespace(
+        get_user=lambda _user_id: {'lang': 'am'},
+        log_activity=lambda *_args: None,
+    )
+    bot = RecordingBot()
+    support.register(bot, db)
+    support.awaiting_support_message.add(42)
+    photo_message = SimpleNamespace(
+        content_type='photo',
+        photo=[SimpleNamespace(file_id='telegram-file-id')],
+        caption='Damaged item',
+        from_user=SimpleNamespace(
+            id=42,
+            first_name='Aster',
+            last_name=None,
+            username=None,
+        ),
+        chat=SimpleNamespace(id=42),
+    )
+    photo_handler = next(
+        handler for filters, handler in bot.message_handlers
+        if filters.get('content_types') == ['photo']
+        and filters.get('func')
+        and filters['func'](photo_message)
+    )
+
+    photo_handler(photo_message)
+
+    assert 'Damaged item' in bot.messages[0][1]
+    assert bot.photos[0][0:2] == (100, 'telegram-file-id')
+    assert 42 not in support.awaiting_support_message
+
+
+def test_admin_reply_to_ticket_is_relayed_to_the_customer(monkeypatch):
+    monkeypatch.setattr(config.bot, 'ADMIN_IDS', [100])
+    db = SimpleNamespace(
+        get_user=lambda user_id: {'lang': 'en'},
+    )
+    bot = RecordingBot()
+    support.register(bot, db)
+    reply = SimpleNamespace(
+        text='Thank you for contacting us.',
+        from_user=SimpleNamespace(id=100),
+        chat=SimpleNamespace(id=100),
+        reply_to_message=SimpleNamespace(
+            text=(
+                '🆘 አዲስ የደንበኛ ጥያቄ / New Support Ticket\n'
+                'User ID: 42'
+            ),
+            from_user=SimpleNamespace(is_bot=True),
+        ),
+    )
+    reply_handler = next(
+        handler for filters, handler in bot.message_handlers
+        if filters.get('content_types') == ['text']
+        and filters.get('func')
+        and filters['func'](reply)
+    )
+
+    reply_handler(reply)
+
+    assert bot.messages[0] == (
+        42,
+        '💬 ከድጋፍ ሰጪ የተላከ ምላሽ / Support Reply:\n\n'
+        'Thank you for contacting us.',
+    )
+    assert bot.messages[1] == (
+        100,
+        '✅ The reply was sent to the customer.',
+    )
+
+
+def test_cancel_and_main_menu_exit_support_message_state(monkeypatch):
+    support.awaiting_support_message.clear()
+    shown = []
+    monkeypatch.setattr(start, 'show_welcome', lambda *args: shown.append(args))
+    db = SimpleNamespace(
+        get_user=lambda _user_id: {'lang': 'en'},
+        log_activity=lambda *_args: None,
+    )
+    bot = RecordingBot()
+    support.register(bot, db)
+    start.register(bot, db)
+    support.awaiting_support_message.add(42)
+    cancel = next(
+        handler for filters, handler in bot.message_handlers
+        if filters.get('commands') == ['cancel']
+    )
+    cancel(SimpleNamespace(
+        text='/cancel',
+        from_user=SimpleNamespace(id=42),
+        chat=SimpleNamespace(id=42),
+    ))
+    assert 42 not in support.awaiting_support_message
+
+    support.awaiting_support_message.add(42)
+    cancel_text = SimpleNamespace(
+        text='❌ Cancel',
+        from_user=SimpleNamespace(id=42),
+        chat=SimpleNamespace(id=42),
+    )
+    cancel_text_handler = next(
+        handler for filters, handler in bot.message_handlers
+        if handler.__name__ == 'cancel_support_text'
+        and filters['func'](cancel_text)
+    )
+    cancel_text_handler(cancel_text)
+    assert 42 not in support.awaiting_support_message
+
+    support.awaiting_support_message.add(42)
+    main_menu_text = SimpleNamespace(
+        text='Main Menu',
+        from_user=SimpleNamespace(id=42),
+        chat=SimpleNamespace(id=42),
+    )
+    support_text_filter = next(
+        filters['func']
+        for filters, handler in bot.message_handlers
+        if handler.__name__ == 'submit_text_ticket'
+    )
+    assert not support_text_filter(main_menu_text)
+    menu_text_handler = next(
+        handler for filters, handler in bot.message_handlers
+        if handler.__name__ == 'menu_text_command'
+        and filters['func'](main_menu_text)
+    )
+    menu_text_handler(main_menu_text)
+    assert 42 not in support.awaiting_support_message
+
+    support.awaiting_support_message.add(42)
+    menu_command = next(
+        handler for filters, handler in bot.message_handlers
+        if filters.get('commands') == ['menu']
+    )
+    menu_command(SimpleNamespace(
+        text='/menu',
+        from_user=SimpleNamespace(id=42),
+        chat=SimpleNamespace(id=42),
+    ))
+    assert 42 not in support.awaiting_support_message
+    assert shown
+
+
 def test_help_back_button_and_locale_labels_have_one_back_emoji():
     for lang in ('am', 'en'):
         locale_path = Path(__file__).parent.parent / 'locales' / f'{lang}.json'
@@ -1481,7 +1802,13 @@ def test_help_back_button_and_locale_labels_have_one_back_emoji():
             from_user=SimpleNamespace(id=42),
             chat=SimpleNamespace(id=42),
         ))
-        back_label = bot.message_options[-1]['reply_markup'].keyboard[0][0].text
+        help_labels = [
+            button.text
+            for row in bot.message_options[-1]['reply_markup'].keyboard
+            for button in row
+        ]
+        assert all(label.count('🔙') <= 1 for label in help_labels)
+        back_label = get_back_keyboard(lang=lang).keyboard[0][0].text
         assert back_label.count('🔙') == 1
 
 
