@@ -117,10 +117,14 @@ def test_admin_photo_upload_helpers_handle_add_product_state():
     class FakeBot:
         def __init__(self):
             self.messages = []
+            self.next_steps = []
 
         def send_message(self, chat_id, text, **kwargs):
             self.messages.append((chat_id, text, kwargs))
-            return True
+            return SimpleNamespace(chat=SimpleNamespace(id=chat_id))
+
+        def register_next_step_handler(self, message, handler, *args, **kwargs):
+            self.next_steps.append((message, handler, args, kwargs))
 
     bot = FakeBot()
     msg = SimpleNamespace(
@@ -131,10 +135,14 @@ def test_admin_photo_upload_helpers_handle_add_product_state():
     )
 
     class FakeDB:
+        def __init__(self):
+            self.created_products = []
+
         def get_user(self, _user_id):
             return {'lang': 'am'}
 
         def create_product(self, product_data):
+            self.created_products.append(product_data)
             return 42
 
         def log_activity(self, *args, **kwargs):
@@ -142,4 +150,6 @@ def test_admin_photo_upload_helpers_handle_add_product_state():
 
     db = FakeDB()
     assert handle_admin_photo(msg, db, bot) is True
-    assert admin_states.get(user_id) is None
+    assert admin_states[user_id]['data']['images'] == ['abc']
+    assert db.created_products == []
+    assert bot.next_steps

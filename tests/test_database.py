@@ -1,6 +1,7 @@
 import pytest
 
 from database import Database
+from models.product import get_images
 
 
 class FakeCursor:
@@ -125,6 +126,47 @@ def test_schema_uses_postgresql_types_and_native_sql():
     assert 'INSERT OR REPLACE' not in sql
     assert 'GROUP_CONCAT' not in sql
     assert '?' not in sql
+
+
+def test_product_image_migration_and_legacy_image_round_trip():
+    db = make_database()
+    db.init_database()
+    db._pool.fetchone_rows = [{'id': 42}]
+
+    product_id = db.create_product({
+        'name_am': 'Dress',
+        'name_en': 'Dress',
+        'price': 10,
+        'category': 'Women',
+        'image_id': 'legacy-photo',
+    })
+
+    insert_query = next(
+        query for query in db._pool.statements
+        if query.lstrip().startswith('INSERT INTO products')
+    )
+    assert product_id == 42
+    assert 'ALTER TABLE products ADD COLUMN IF NOT EXISTS images JSONB' in (
+        ' '.join(db._pool.statements)
+    )
+    assert db._pool.last_params[9] == 'legacy-photo'
+    assert db._pool.last_params[10] == '["legacy-photo"]'
+    assert 'image_id, images, stock_quantity' in insert_query
+
+
+def test_get_images_deduplicates_and_preserves_legacy_primary_order():
+    assert get_images({
+        'image_id': 'primary',
+        'images': ['secondary', 'primary', 'third'],
+    }) == ['primary', 'secondary', 'third']
+    assert get_images({'image_id': 'legacy'}) == ['legacy']
+    assert get_images({
+        'image_id': '1',
+        'images': [str(image_id) for image_id in range(2, 15)],
+    }) == [str(image_id) for image_id in range(1, 11)]
+    assert get_images({'photo_file_id': 'legacy-photo-id'}) == [
+        'legacy-photo-id',
+    ]
 
 
 def test_payment_status_default_migration_runs_after_type_migration():

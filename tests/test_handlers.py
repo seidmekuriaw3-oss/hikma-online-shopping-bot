@@ -18,6 +18,7 @@ from keyboards.inline import (
     get_storefront_categories_keyboard,
 )
 from keyboards.reply import get_main_menu
+from models.product import get_images
 from services.notifications import send_order_update, send_payment_confirmation
 
 
@@ -212,15 +213,19 @@ def test_add_product_callback_tracks_fresh_admin_through_all_steps(monkeypatch):
         ('Men', 'text'),
         ('3', 'text'),
         (None, 'photo'),
+        (None, 'photo'),
+        ('✅ Done', 'text'),
     ]
     for index, (text, content_type) in enumerate(responses):
-        _, handler, args, kwargs = bot.next_steps[index]
+        _, handler, args, kwargs = bot.next_steps[-1]
         message = SimpleNamespace(
             chat=SimpleNamespace(id=user_id),
             from_user=SimpleNamespace(id=user_id),
             text=text,
             content_type=content_type,
-            photo=[SimpleNamespace(file_id='photo-id')] if content_type == 'photo' else [],
+            photo=[
+                SimpleNamespace(file_id=f'photo-{index}')
+            ] if content_type == 'photo' else [],
         )
         handler(message, *args, **kwargs)
 
@@ -230,7 +235,8 @@ def test_add_product_callback_tracks_fresh_admin_through_all_steps(monkeypatch):
         'price': 20.0,
         'size': 'M',
         'category': 'Men',
-        'image_id': 'photo-id',
+        'image_id': 'photo-6',
+        'images': ['photo-6', 'photo-7'],
         'stock_quantity': 3,
         'status': 'In Stock',
     }]
@@ -314,6 +320,13 @@ def test_admin_add_product_category_can_be_selected_inline_end_to_end(monkeypatc
         from_user=SimpleNamespace(id=user_id),
         content_type='photo',
         photo=[SimpleNamespace(file_id='dress-photo')],
+    ), *args, **kwargs)
+    _, done_handler, args, kwargs = bot.next_steps[-1]
+    done_handler(SimpleNamespace(
+        chat=SimpleNamespace(id=user_id),
+        from_user=SimpleNamespace(id=user_id),
+        text='✅ Done',
+        content_type='text',
     ), *args, **kwargs)
 
     assert created_products[0]['category'] == 'women'
@@ -1362,6 +1375,169 @@ def test_product_keyboard_has_previous_and_next_navigation():
 
     assert 'product_nav_Men_0' in callback_data
     assert 'product_nav_Men_2' in callback_data
+
+
+def test_product_photo_gallery_cycles_without_cluttering_and_hides_single_photo_nav():
+    product = {
+        'id': 5,
+        'name_am': 'ቀሚስ',
+        'name_en': 'Dress',
+        'description_en': 'A sample dress',
+        'price': 120,
+        'size': 'M',
+        'stock_quantity': 2,
+        'status': 'In Stock',
+        'category': 'Women',
+        'image_id': 'photo-one',
+        'images': ['photo-one', 'photo-two', 'photo-three'],
+    }
+    db = SimpleNamespace(
+        get_user=lambda _user_id: {'lang': 'en'},
+        get_product=lambda product_id: product if product_id == 5 else None,
+        log_activity=lambda *_args: None,
+    )
+    bot = RecordingBot()
+    products.register(bot, db)
+    view_call = SimpleNamespace(
+        id='view-product',
+        data='product_view_5',
+        from_user=SimpleNamespace(id=42),
+        message=SimpleNamespace(
+            chat=SimpleNamespace(id=42),
+            message_id=10,
+            content_type='text',
+        ),
+    )
+    view_handler = next(
+        handler for filters, handler in bot.callback_handlers
+        if handler.__name__ == 'handle_product_navigation'
+        and filters['func'](view_call)
+    )
+    view_handler(view_call)
+
+    assert bot.photos[-1][1] == 'photo-one'
+    assert get_images(product) == ['photo-one', 'photo-two', 'photo-three']
+    gallery = bot.photos[-1][2]['reply_markup']
+    assert [
+        button.text
+        for button in gallery.keyboard[0]
+    ] == ['1/3', 'Next ➡️']
+    assert any(
+        button.callback_data == 'product_buy_5'
+        for row in gallery.keyboard
+        for button in row
+    )
+    assert any(
+        button.callback_data == 'product_wishlist_5'
+        for row in gallery.keyboard
+        for button in row
+    )
+
+    image_call = SimpleNamespace(
+        id='next-photo',
+        data='product_image_5_1_detail',
+        from_user=SimpleNamespace(id=42),
+        message=SimpleNamespace(
+            chat=SimpleNamespace(id=42),
+            message_id=bot._next_message_id - 1,
+        ),
+    )
+    image_handler = next(
+        handler for filters, handler in bot.callback_handlers
+        if handler.__name__ == 'handle_product_image_navigation'
+    )
+    image_handler(image_call)
+    assert bot.edits[-1][1].media == 'photo-two'
+    assert [
+        button.text
+        for button in bot.edits[-1][4]['reply_markup'].keyboard[0]
+    ] == ['⬅️ Previous', '2/3', 'Next ➡️']
+
+    single_product = dict(product, image_id='only-photo', images=[])
+    products.show_product_card(42, single_product, 0, 1, 'Women', 'en', bot)
+    single_keyboard = bot.photos[-1][2]['reply_markup']
+    assert not any(
+        button.callback_data and button.callback_data.startswith('product_image_')
+        for row in single_keyboard.keyboard
+        for button in row
+    )
+
+
+def test_admin_can_add_photos_to_existing_product(monkeypatch):
+    user_id = 42
+    monkeypatch.setattr(config.bot, 'ADMIN_IDS', [user_id])
+    monkeypatch.setattr(admin, 'admin_states', {})
+    monkeypatch.setattr(admin, 'admin_uploading', set())
+    product = {
+        'id': 9,
+        'image_id': 'existing-primary',
+        'images': ['existing-primary'],
+    }
+    updated = []
+    db = SimpleNamespace(
+        get_user=lambda _user_id: {'lang': 'en'},
+        get_product=lambda product_id: product if product_id == 9 else None,
+        update_product=lambda product_id, **kwargs: (
+            updated.append((product_id, kwargs)) or True
+        ),
+    )
+    bot = RecordingBot()
+    admin.register(bot, db)
+    edit_result = admin.process_edit_product(
+        SimpleNamespace(
+            text='9',
+            from_user=SimpleNamespace(id=user_id),
+            chat=SimpleNamespace(id=user_id),
+        ),
+        db,
+        bot,
+        user_id=user_id,
+    )
+    assert edit_result
+    edit_markup = bot.message_options[-1]['reply_markup']
+    add_callback = next(
+        button.callback_data
+        for row in edit_markup.keyboard
+        for button in row
+        if button.callback_data.startswith('product_photos_add_')
+    )
+    add_call = SimpleNamespace(
+        id='add-product-photo',
+        data=add_callback,
+        from_user=SimpleNamespace(id=user_id),
+        message=SimpleNamespace(chat=SimpleNamespace(id=user_id)),
+    )
+    add_handler = next(
+        handler for filters, handler in bot.callback_handlers
+        if handler.__name__ == 'handle_product_photos_action'
+        and filters['func'](add_call)
+    )
+    add_handler(add_call)
+
+    photo_message = SimpleNamespace(
+        content_type='photo',
+        photo=[SimpleNamespace(file_id='new-photo')],
+        from_user=SimpleNamespace(id=user_id),
+        chat=SimpleNamespace(id=user_id),
+    )
+    admin._process_product_image_management(photo_message, db, bot)
+    done_call = SimpleNamespace(
+        id='finish-photo-management',
+        data='admin_product_photos_done',
+        from_user=SimpleNamespace(id=user_id),
+        message=SimpleNamespace(chat=SimpleNamespace(id=user_id)),
+    )
+    done_handler = next(
+        handler for filters, handler in bot.callback_handlers
+        if handler.__name__ == 'handle_add_product_photos_done'
+    )
+    done_handler(done_call)
+
+    assert updated == [(
+        9,
+        {'image_id': 'existing-primary', 'images': ['existing-primary', 'new-photo']},
+    )]
+    assert user_id not in admin.admin_states
 
 
 def test_social_keyboard_uses_configured_admin_username(monkeypatch):

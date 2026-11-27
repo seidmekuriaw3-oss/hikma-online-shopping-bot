@@ -30,6 +30,7 @@ from keyboards.admin import (
     get_admin_reports_keyboard,
     get_admin_discounts_keyboard,
 )
+from models.product import MAX_PRODUCT_IMAGES, get_images
 from services.notifications import notify_admins, send_broadcast
 
 logger = logging.getLogger(__name__)
@@ -297,48 +298,105 @@ def process_add_product_stock(message: Message, db: Database, bot: TeleBot):
 
 
 def process_add_product_image(message: Message, db: Database, bot: TeleBot):
-    """የምርት ፎቶ ማስኬድ"""
+    """Collect product photos until the administrator confirms the gallery."""
     user_id = message.from_user.id
     lang = get_user_lang(db, user_id)
+    state = _ensure_add_product_state(user_id)
+    data = state['data']
+    images = data.setdefault('images', [])
+
+    done_values = {'✅ ጨርሻለሁ', '✅ Done', 'Done'}
+    if (getattr(message, 'text', None) or '').strip() in done_values:
+        if not images:
+            bot.send_message(
+                message.chat.id,
+                "❌ " + get_text(lang, 'invalid_photo'),
+            )
+            admin_uploading.add(user_id)
+            bot.register_next_step_handler(
+                message, process_add_product_image, db, bot
+            )
+            return
+        _finish_add_product(message, db, bot)
+        return
 
     if message.content_type != 'photo':
         bot.send_message(
             message.chat.id,
             "❌ " + get_text(lang, 'invalid_photo')
         )
+        admin_uploading.add(user_id)
         bot.register_next_step_handler(message, process_add_product_image, db, bot)
         return
 
-    admin_uploading.discard(user_id)
-    image_id = message.photo[-1].file_id
-    state = _ensure_add_product_state(user_id)
-    data = state['data']
-    required_fields = ('name_am', 'name_en', 'price', 'size', 'category', 'stock_quantity')
+    image_id = message.photo[-1].file_id if message.photo else None
+    if image_id and image_id not in images and len(images) < MAX_PRODUCT_IMAGES:
+        images.append(image_id)
+    if len(images) >= MAX_PRODUCT_IMAGES:
+        response = get_text(lang, 'product_photos_max').format(
+            count=len(images),
+        )
+    else:
+        response = get_text(lang, 'product_photos_added').format(
+            count=len(images),
+        )
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton(
+        get_text(lang, 'product_photos_done'),
+        callback_data='admin_product_photos_done',
+    ))
+    prompt = bot.send_message(
+        message.chat.id,
+        response,
+        reply_markup=markup,
+    )
+    admin_uploading.add(user_id)
+    bot.register_next_step_handler(
+        prompt, process_add_product_image, db, bot
+    )
+
+
+def _finish_add_product(
+    message: Message,
+    db: Database,
+    bot: TeleBot,
+    user_id: Optional[int] = None,
+) -> bool:
+    user_id = user_id if user_id is not None else message.from_user.id
+    lang = get_user_lang(db, user_id)
+    state = admin_states.get(user_id)
+    if not state or state.get('action') != 'add_product':
+        return False
+    data = state.get('data', {})
+    required_fields = (
+        'name_am', 'name_en', 'price', 'size', 'category', 'stock_quantity'
+    )
     if any(field not in data for field in required_fields):
         _send_admin_message(
-            bot,
-            message,
-            "❌ " + get_text(lang, 'product_add_expired'),
+            bot, message, "❌ " + get_text(lang, 'product_add_expired')
         )
         admin_states.pop(user_id, None)
-        return
+        admin_uploading.discard(user_id)
+        return False
 
+    images = get_images({'images': data.get('images', [])})
+    if not images:
+        bot.send_message(message.chat.id, "❌ " + get_text(lang, 'invalid_photo'))
+        return False
     product_data = {
         'name_am': data['name_am'],
         'name_en': data['name_en'],
         'price': data['price'],
         'size': data['size'],
         'category': data['category'],
-        'image_id': image_id,
+        'image_id': images[0],
+        'images': images,
         'stock_quantity': data['stock_quantity'],
-        'status': 'In Stock'
+        'status': 'In Stock',
     }
-
     product_id = db.create_product(product_data)
-
     if product_id:
         _notify_product_added(bot, data, product_id, lang)
-
         bot.send_message(
             message.chat.id,
             "✅ " + get_text(lang, 'product_added').format(
@@ -347,17 +405,15 @@ def process_add_product_image(message: Message, db: Database, bot: TeleBot):
                 product_id,
             )
         )
-
-        db.log_activity(user_id, 'add_product',
-                      f"ምርት: {data['name_am']}, ID: {product_id}")
+        db.log_activity(user_id, 'add_product', f"Product ID: {product_id}")
     else:
         bot.send_message(
             message.chat.id,
             "❌ " + get_text(lang, 'product_add_failed')
         )
-
     admin_states.pop(user_id, None)
-    _send_admin_message(bot, message, "⚙️ " + get_text(lang, 'admin_panel'))
+    admin_uploading.discard(user_id)
+    return bool(product_id)
 
 
 def is_admin_uploading(user_id: int) -> bool:
@@ -372,61 +428,110 @@ def handle_admin_photo(message: Message, db: Database, bot: TeleBot):
     if not is_admin_uploading(user_id):
         return False
 
-    admin_uploading.discard(user_id)
     state = admin_states.get(user_id)
     if not state or state.get('action') != 'add_product':
+        if state and state.get('action') == 'manage_product_images':
+            _process_product_image_management(message, db, bot)
+            return True
+        admin_uploading.discard(user_id)
         _send_admin_message(bot, message, "📸 " + get_text(lang, 'photo_received'))
         return True
+    process_add_product_image(message, db, bot)
+    return True
 
-    try:
-        image_id = message.photo[-1].file_id if message.photo else None
-        if not image_id:
-            bot.send_message(
-                message.chat.id,
-                "❌ " + get_text(lang, 'invalid_photo'),
-            )
-            return False
 
-        data = state.get('data', {})
-        product_data = {
-            'name_am': data.get('name_am'),
-            'name_en': data.get('name_en'),
-            'price': data.get('price'),
-            'size': data.get('size'),
-            'category': data.get('category'),
-            'image_id': image_id,
-            'stock_quantity': data.get('stock_quantity', 0),
-            'status': 'In Stock'
-        }
+def _process_add_product_image(message: Message, db: Database, bot: TeleBot):
+    """Alias for the module-level add flow used by register-local handlers."""
+    return process_add_product_image(message, db, bot)
 
-        product_id = db.create_product(product_data)
-        if product_id:
-            _notify_product_added(bot, data, product_id, lang)
-            bot.send_message(
-                message.chat.id,
-                "✅ " + get_text(lang, 'product_added').format(
-                    data.get('name_am' if lang == 'am' else 'name_en')
-                    or get_text(lang, 'product'),
-                    product_id,
-                )
-            )
-            db.log_activity(user_id, 'add_product', f"ምርት: {data.get('name_am')}, ID: {product_id}")
-        else:
-            bot.send_message(
-                message.chat.id,
-                "❌ " + get_text(lang, 'product_add_failed'),
-            )
 
-        admin_states.pop(user_id, None)
-        return True
-    except Exception as exc:
-        logger.exception("Could not process the admin product photo: %s", exc)
+def _process_product_image_management(
+    message: Message,
+    db: Database,
+    bot: TeleBot,
+):
+    user_id = message.from_user.id
+    lang = get_user_lang(db, user_id)
+    state = admin_states.get(user_id)
+    if not state or state.get('action') != 'manage_product_images':
+        admin_uploading.discard(user_id)
+        return
+    if (getattr(message, 'text', None) or '').strip() in {
+        '✅ ጨርሻለሁ', '✅ Done', 'Done'
+    }:
+        _save_managed_product_images(message, db, bot)
+        return
+    if message.content_type != 'photo' or not message.photo:
+        bot.send_message(
+            message.chat.id,
+            "❌ " + get_text(lang, 'invalid_photo'),
+        )
+        admin_uploading.add(user_id)
+        bot.register_next_step_handler(
+            message, _process_product_image_management, db, bot
+        )
+        return
+
+    images = state.setdefault('images', [])
+    image_id = message.photo[-1].file_id
+    if image_id not in images and len(images) < MAX_PRODUCT_IMAGES:
+        images.append(image_id)
+    key = (
+        'product_photos_max'
+        if len(images) >= MAX_PRODUCT_IMAGES
+        else 'product_photos_added'
+    )
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton(
+        get_text(lang, 'product_photos_done'),
+        callback_data='admin_product_photos_done',
+    ))
+    prompt = bot.send_message(
+        message.chat.id,
+        get_text(lang, key).format(count=len(images)),
+        reply_markup=markup,
+    )
+    admin_uploading.add(user_id)
+    bot.register_next_step_handler(
+        prompt, _process_product_image_management, db, bot
+    )
+
+
+def _save_managed_product_images(
+    message: Message,
+    db: Database,
+    bot: TeleBot,
+    user_id: Optional[int] = None,
+):
+    user_id = user_id if user_id is not None else message.from_user.id
+    lang = get_user_lang(db, user_id)
+    state = admin_states.get(user_id)
+    if not state or state.get('action') != 'manage_product_images':
+        return False
+    images = get_images({'images': state.get('images', [])})
+    if not images:
+        bot.send_message(message.chat.id, "❌ " + get_text(lang, 'invalid_photo'))
+        return False
+    product_id = state['product_id']
+    if not db.update_product(
+        product_id,
+        image_id=images[0],
+        images=images,
+    ):
         bot.send_message(
             message.chat.id,
             "❌ " + get_text(lang, 'product_photo_failed'),
         )
-        admin_states.pop(user_id, None)
         return False
+    admin_states.pop(user_id, None)
+    admin_uploading.discard(user_id)
+    bot.send_message(
+        message.chat.id,
+        "✅ " + get_text(lang, 'product_photos_updated').format(
+            count=len(images)
+        ),
+    )
+    return True
 
 
 def register(bot: TeleBot, db: Database):
@@ -672,6 +777,76 @@ def register(bot: TeleBot, db: Database):
     
     # ከዚህ በታች የ Callback እጅ አያያዞች
     
+    @bot.callback_query_handler(
+        func=lambda call: call.data in (
+            'admin_product_photos_done',
+        )
+    )
+    def handle_add_product_photos_done(call: CallbackQuery):
+        user_id = call.from_user.id
+        lang = get_user_lang(db, user_id)
+        if not is_admin(user_id, config.bot.ADMIN_IDS):
+            bot.answer_callback_query(call.id, get_text(lang, 'not_admin'))
+            return
+        state = admin_states.get(user_id)
+        if state and state.get('action') == 'add_product':
+            _finish_add_product(call.message, db, bot, user_id=user_id)
+        elif state and state.get('action') == 'manage_product_images':
+            _save_managed_product_images(
+                call.message, db, bot, user_id=user_id
+            )
+        else:
+            bot.answer_callback_query(
+                call.id, get_text(lang, 'product_add_expired')
+            )
+            return
+        bot.answer_callback_query(call.id)
+
+    @bot.callback_query_handler(
+        func=lambda call: call.data.startswith('product_photos_')
+    )
+    def handle_product_photos_action(call: CallbackQuery):
+        user_id = call.from_user.id
+        lang = get_user_lang(db, user_id)
+        if not is_admin(user_id, config.bot.ADMIN_IDS):
+            bot.answer_callback_query(call.id, get_text(lang, 'not_admin'))
+            return
+        try:
+            _, _, action, product_id_text = call.data.split('_', 3)
+            product_id = int(product_id_text)
+        except (ValueError, TypeError):
+            bot.answer_callback_query(
+                call.id, get_text(lang, 'product_not_found_admin')
+            )
+            return
+        product = db.get_product(product_id)
+        if not product:
+            bot.answer_callback_query(
+                call.id, get_text(lang, 'product_not_found_admin')
+            )
+            return
+        existing_images = get_images(product)
+        admin_states[user_id] = {
+            'action': 'manage_product_images',
+            'product_id': product_id,
+            'mode': action,
+            'images': existing_images if action == 'add' else [],
+        }
+        admin_uploading.add(user_id)
+        prompt = bot.send_message(
+            call.message.chat.id,
+            get_text(
+                lang,
+                'product_photos_add_prompt'
+                if action == 'add'
+                else 'product_photos_replace_prompt',
+            ),
+        )
+        bot.register_next_step_handler(
+            prompt, _process_product_image_management, db, bot
+        )
+        bot.answer_callback_query(call.id)
+
     @bot.callback_query_handler(func=lambda call: (
         call.data.startswith('admin_')
         and not call.data.startswith(('admin_order_', 'admin_find_user', 'admin_toggle_ban_'))
@@ -732,7 +907,9 @@ def register(bot: TeleBot, db: Database):
         
         # ምርት ማስተካከል
         elif data == 'admin_edit_product':
-            start_edit_product(call.message, db, bot)
+            start_edit_product(
+                call.message, db, bot, user_id=call.from_user.id
+            )
         
         # ምርት መሰረዝ
         elif data == 'admin_delete_product':
@@ -978,69 +1155,7 @@ def register(bot: TeleBot, db: Database):
             bot.register_next_step_handler(message, process_add_product_stock, db, bot)
     
     def process_add_product_image(message: Message, db: Database, bot: TeleBot):
-        """የምርት ፎቶ ማስኬድ"""
-        user_id = message.from_user.id
-        lang = get_user_lang(db, user_id)
-        
-        if message.content_type != 'photo':
-            bot.send_message(
-                message.chat.id,
-                "❌ " + get_text(lang, 'invalid_photo')
-            )
-            bot.register_next_step_handler(message, process_add_product_image, db, bot)
-            return
-        
-        admin_uploading.discard(user_id)
-        image_id = message.photo[-1].file_id
-        state = _ensure_add_product_state(user_id)
-        data = state['data']
-        required_fields = ('name_am', 'name_en', 'price', 'size', 'category', 'stock_quantity')
-        if any(field not in data for field in required_fields):
-            _send_admin_message(
-                bot,
-                message,
-                "❌ " + get_text(lang, 'product_add_expired'),
-            )
-            admin_states.pop(user_id, None)
-            return
-        
-        # ምርት መፍጠር
-        product_data = {
-            'name_am': data['name_am'],
-            'name_en': data['name_en'],
-            'price': data['price'],
-            'size': data['size'],
-            'category': data['category'],
-            'image_id': image_id,
-            'stock_quantity': data['stock_quantity'],
-            'status': 'In Stock'
-        }
-        
-        product_id = db.create_product(product_data)
-        
-        if product_id:
-            _notify_product_added(bot, data, product_id, lang)
-            
-            bot.send_message(
-                message.chat.id,
-                "✅ " + get_text(lang, 'product_added').format(
-                    data.get('name_am' if lang == 'am' else 'name_en')
-                    or get_text(lang, 'product'),
-                    product_id,
-                )
-            )
-            
-            db.log_activity(user_id, 'add_product', 
-                          f"ምርት: {data['name_am']}, ID: {product_id}")
-        else:
-            bot.send_message(
-                message.chat.id,
-                "❌ " + get_text(lang, 'product_add_failed')
-            )
-        
-        # ሁኔታን ማጽዳት
-        admin_states.pop(user_id, None)
-        show_admin_panel(message)
+        return _process_add_product_image(message, db, bot)
 
 
 # ==================== ሌሎች የአስተዳዳሪ ተግባራት ====================
@@ -1335,11 +1450,67 @@ def list_products(message: Message, db: Database, bot: TeleBot):
     return products
 
 
-def start_edit_product(message: Message, db: Database, bot: TeleBot):
-    """ምርት ማስተካከል ሂደት መጀመር"""
-    lang = get_user_lang(db, message.from_user.id)
-    bot.send_message(message.chat.id, "✏️ " + get_text(lang, 'enter_product_id'))
+def start_edit_product(
+    message: Message,
+    db: Database,
+    bot: TeleBot,
+    user_id: Optional[int] = None,
+):
+    """Ask the administrator which product's photo gallery to manage."""
+    user_id = user_id if user_id is not None else message.from_user.id
+    lang = get_user_lang(db, user_id)
+    prompt = bot.send_message(
+        message.chat.id,
+        "✏️ " + get_text(lang, 'enter_product_id'),
+    )
+    bot.register_next_step_handler(
+        prompt, process_edit_product, db, bot, user_id
+    )
     return "edit product started"
+
+
+def process_edit_product(
+    message: Message,
+    db: Database,
+    bot: TeleBot,
+    user_id: Optional[int] = None,
+):
+    user_id = user_id if user_id is not None else message.from_user.id
+    lang = get_user_lang(db, user_id)
+    try:
+        product_id = int((message.text or '').strip())
+    except ValueError:
+        bot.send_message(
+            message.chat.id,
+            "❌ " + get_text(lang, 'enter_product_id_invalid'),
+        )
+        return False
+    product = db.get_product(product_id)
+    if not product:
+        bot.send_message(
+            message.chat.id,
+            "❌ " + get_text(lang, 'product_not_found_admin'),
+        )
+        return False
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton(
+            get_text(lang, 'product_photos_add'),
+            callback_data=f'product_photos_add_{product_id}',
+        ),
+        InlineKeyboardButton(
+            get_text(lang, 'product_photos_replace'),
+            callback_data=f'product_photos_replace_{product_id}',
+        ),
+    )
+    bot.send_message(
+        message.chat.id,
+        get_text(lang, 'product_photos_edit_menu').format(
+            count=len(get_images(product))
+        ),
+        reply_markup=markup,
+    )
+    return True
 
 
 def start_delete_product(message: Message, db: Database, bot: TeleBot):

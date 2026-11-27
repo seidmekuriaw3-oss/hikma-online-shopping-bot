@@ -199,6 +199,8 @@ def get_browse_product_keyboard(
     index: int,
     total: int,
     lang: str = 'am',
+    photo_index: int = 0,
+    photo_count: int = 1,
 ) -> InlineKeyboardMarkup:
     """Build the compact keyboard used by category product cards."""
     markup = InlineKeyboardMarkup(row_width=2)
@@ -215,6 +217,14 @@ def get_browse_product_keyboard(
             callback_data=f"browse_cat:{category}:{index + 1}" if index < total - 1 else "browse_noop",
         ),
     )
+    if photo_count > 1:
+        markup.row(*get_product_photo_navigation(
+            product_id,
+            photo_index,
+            photo_count,
+            lang,
+            view='browse',
+        ))
     markup.row(
         InlineKeyboardButton(
             "🛒 ወደ ጋሪ ጨምር" if lang == 'am' else "🛒 Add to Cart",
@@ -241,6 +251,36 @@ def get_browse_product_keyboard(
     )
     markup.row(*action_row)
     return markup
+
+
+def get_product_photo_navigation(
+    product_id: int,
+    photo_index: int,
+    photo_count: int,
+    lang: str,
+    view: str,
+):
+    """Build the photo gallery row shared by product-card layouts."""
+    buttons = []
+    if photo_index > 0:
+        buttons.append(InlineKeyboardButton(
+            "⬅️ ቀዳሚ" if lang == 'am' else "⬅️ Previous",
+            callback_data=(
+                f"product_image_{product_id}_{photo_index - 1}_{view}"
+            ),
+        ))
+    buttons.append(InlineKeyboardButton(
+        f"{photo_index + 1}/{photo_count}",
+        callback_data="ignore",
+    ))
+    if photo_index < photo_count - 1:
+        buttons.append(InlineKeyboardButton(
+            "ቀጣይ ➡️" if lang == 'am' else "Next ➡️",
+            callback_data=(
+                f"product_image_{product_id}_{photo_index + 1}_{view}"
+            ),
+        ))
+    return buttons
 
 
 def get_rating_keyboard(product_id: int, lang: str = 'am') -> InlineKeyboardMarkup:

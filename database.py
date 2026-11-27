@@ -17,6 +17,7 @@ from psycopg2 import pool, sql
 from psycopg2.extras import DictCursor
 
 from config import config
+from models.product import get_images
 from utils.logger import get_logger
 
 logger = get_logger('database')
@@ -503,6 +504,18 @@ class Database:
                 )
             ''')
             self._migrate_postgres_schema(cursor)
+            cursor.execute(
+                "ALTER TABLE products ADD COLUMN IF NOT EXISTS images JSONB"
+            )
+            cursor.execute(
+                "SELECT version FROM schema_migrations WHERE version = %s",
+                (3,),
+            )
+            if not cursor.fetchone():
+                cursor.execute(
+                    "INSERT INTO schema_migrations (version) VALUES (%s)",
+                    (3,),
+                )
             
             logger.info("✅ ሁሉም የውሂብ ጎታ ሰንጠረዦች ተፈጥረዋል")
 
@@ -832,6 +845,10 @@ class DatabaseMixin:
     def create_product(self, data: Dict) -> Optional[int]:
         """አዲስ ምርት መፍጠር"""
         try:
+            product_data = dict(data)
+            image_ids = get_images(product_data)
+            product_data['image_id'] = image_ids[0] if image_ids else None
+            product_data['images'] = image_ids
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
@@ -843,15 +860,15 @@ class DatabaseMixin:
                     ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                 ''', (
-                    data.get('name_am'), data.get('name_en'),
-                    data.get('description_am'), data.get('description_en'),
-                    data.get('price'), data.get('compare_price'),
-                    data.get('size'), data.get('category'), data.get('subcategory'),
-                    data.get('image_id'), json.dumps(data.get('images', [])),
-                    data.get('stock_quantity', 0),
-                    data.get('is_featured', 0),
-                    data.get('is_on_sale', 0),
-                    data.get('discount_percent', 0)
+                    product_data.get('name_am'), product_data.get('name_en'),
+                    product_data.get('description_am'), product_data.get('description_en'),
+                    product_data.get('price'), product_data.get('compare_price'),
+                    product_data.get('size'), product_data.get('category'), product_data.get('subcategory'),
+                    product_data.get('image_id'), json.dumps(product_data['images']),
+                    product_data.get('stock_quantity', 0),
+                    product_data.get('is_featured', 0),
+                    product_data.get('is_on_sale', 0),
+                    product_data.get('discount_percent', 0)
                 ))
                 return cursor.fetchone()['id']
         except psycopg2.Error:
@@ -872,6 +889,7 @@ class DatabaseMixin:
                 product = dict(row)
                 if product.get('images'):
                     product['images'] = _decode_json(product['images'])
+                product['images'] = get_images(product)
                 return product
             return None
         except psycopg2.Error:
@@ -915,7 +933,14 @@ class DatabaseMixin:
             params.extend([limit, offset])
 
             cursor = self.execute(query, tuple(params))
-            return [dict(row) for row in cursor.fetchall()]
+            products = []
+            for row in cursor.fetchall():
+                product = dict(row)
+                if product.get('images'):
+                    product['images'] = _decode_json(product['images'])
+                product['images'] = get_images(product)
+                products.append(product)
+            return products
         except psycopg2.Error:
             raise
         except Exception as e:

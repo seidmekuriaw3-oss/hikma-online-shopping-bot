@@ -17,10 +17,11 @@ from telebot.types import (
 )
 
 from database import Database
+from models.product import get_images
 from utils.helpers import get_text, get_user_lang, format_currency
 from keyboards.inline import (
     get_product_keyboard, get_rating_keyboard, get_browse_product_keyboard,
-    get_storefront_categories_keyboard,
+    get_storefront_categories_keyboard, get_product_photo_navigation,
 )
 from services.notifications import notify_admins
 
@@ -73,11 +74,23 @@ def show_product_card(
     bot: TeleBot,
     message_id: Optional[int] = None,
     is_photo_message: bool = False,
+    photo_index: int = 0,
 ):
     """Send a product card or update the existing carousel message."""
     caption = _product_caption(product, index, total, lang)
-    keyboard = get_browse_product_keyboard(product['id'], category, index, total, lang)
-    image_id = product.get('image_id')
+    images = get_images(product)
+    if images:
+        photo_index = min(max(photo_index, 0), len(images) - 1)
+    keyboard = get_browse_product_keyboard(
+        product['id'],
+        category,
+        index,
+        total,
+        lang,
+        photo_index=photo_index,
+        photo_count=len(images),
+    )
+    image_id = images[photo_index] if images else None
 
     if message_id is not None:
         if image_id:
@@ -555,6 +568,19 @@ def register(bot: TeleBot, db: Database):
         )
     
     def show_product_detail(chat_id: int, product: Dict, lang: str, db: Database, bot: TeleBot):
+        return show_product_detail_image(
+            chat_id, product, lang, db, bot
+        )
+
+    def show_product_detail_image(
+        chat_id: int,
+        product: Dict,
+        lang: str,
+        db: Database,
+        bot: TeleBot,
+        message_id: Optional[int] = None,
+        photo_index: int = 0,
+    ):
         """የምርት ዝርዝር ማሳየት"""
         # የምርት ደረጃ
         rating = product.get('rating_avg', 0)
@@ -594,6 +620,17 @@ def register(bot: TeleBot, db: Database):
         
         # ኪቦርድ
         markup = InlineKeyboardMarkup(row_width=2)
+        images = get_images(product)
+        if images:
+            photo_index = min(max(photo_index, 0), len(images) - 1)
+        if len(images) > 1:
+            markup.row(*get_product_photo_navigation(
+                product['id'],
+                photo_index,
+                len(images),
+                lang,
+                view='detail',
+            ))
         
         if product['stock_quantity'] > 0:
             markup.add(
@@ -621,22 +658,95 @@ def register(bot: TeleBot, db: Database):
             )
         )
         
-        try:
-            bot.send_photo(
-                chat_id,
-                product['image_id'],
-                caption=msg,
+        if message_id is not None and images:
+            bot.edit_message_media(
+                InputMediaPhoto(media=images[photo_index], caption=msg, parse_mode='Markdown'),
+                chat_id=chat_id,
+                message_id=message_id,
                 reply_markup=markup,
-                parse_mode='Markdown'
             )
-        except Exception as e:
-            logger.error("Could not display product photo: %s", e)
+        elif images:
+            try:
+                bot.send_photo(
+                    chat_id,
+                    images[photo_index],
+                    caption=msg,
+                    reply_markup=markup,
+                    parse_mode='Markdown'
+                )
+            except Exception as e:
+                logger.error("Could not display product photo: %s", e)
+                bot.send_message(
+                    chat_id,
+                    msg,
+                    reply_markup=markup,
+                    parse_mode='Markdown'
+                )
+        else:
             bot.send_message(
                 chat_id,
                 msg,
                 reply_markup=markup,
                 parse_mode='Markdown'
             )
+
+    @bot.callback_query_handler(
+        func=lambda call: call.data.startswith('product_image_')
+    )
+    def handle_product_image_navigation(call: CallbackQuery):
+        user_id = call.from_user.id
+        lang = get_user_lang(db, user_id)
+        try:
+            _, _, product_id, photo_index, view = call.data.split('_', 4)
+            product_id = int(product_id)
+            photo_index = int(photo_index)
+        except (TypeError, ValueError):
+            bot.answer_callback_query(call.id, get_text(lang, 'product_not_found'))
+            return
+        product = db.get_product(product_id)
+        images = get_images(product or {})
+        if not product or not 0 <= photo_index < len(images):
+            bot.answer_callback_query(call.id, get_text(lang, 'product_not_found'))
+            return
+        if view == 'detail':
+            show_product_detail_image(
+                call.message.chat.id,
+                product,
+                lang,
+                db,
+                bot,
+                message_id=call.message.message_id,
+                photo_index=photo_index,
+            )
+        elif view == 'browse':
+            products = db.get_products(
+                category=product.get('category'),
+                limit=20,
+                offset=0,
+            )
+            product_index = next(
+                (
+                    index for index, item in enumerate(products)
+                    if item.get('id') == product_id
+                ),
+                0,
+            )
+            show_product_card(
+                call.message.chat.id,
+                product,
+                product_index,
+                max(len(products), 1),
+                product.get('category', ''),
+                lang,
+                bot,
+                message_id=call.message.message_id,
+                is_photo_message=True,
+                photo_index=photo_index,
+            )
+        else:
+            bot.answer_callback_query(call.id, get_text(lang, 'product_not_found'))
+            return
+        bot.answer_callback_query(call.id)
     
     def show_quantity_selector(chat_id: int, product: Dict, lang: str, db: Database, bot: TeleBot):
         """የቁጥር ምርጫ ማሳየት"""
