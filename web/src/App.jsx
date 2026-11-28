@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
-  ArrowDownWideNarrow, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronLeft,
-  ChevronRight, CircleHelp, Heart, Menu, Minus, Moon, Plus, Search, ShoppingBag,
-  SlidersHorizontal, Sun, Trash2, X,
+  ArrowDownWideNarrow, ArrowLeft, ArrowRight, Bell, BookOpen, Check, CheckCheck,
+  ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Heart, House, LayoutGrid,
+  Menu, Minus, Moon, Plus, Search, Settings, ShoppingBag, SlidersHorizontal, Sparkles,
+  Store, Sun, Trash2, UserRound, X,
 } from 'lucide-react'
 import { adminHeaders, api } from './api.js'
 
@@ -48,6 +49,24 @@ const words = {
     uploadHint: 'Drop photos here or click to upload (up to 10)', status: 'Update status',
     customer: 'Customer', total: 'Total', signOut: 'Sign out', adminLoginError: 'Could not verify access token',
     openMenu: 'Open menu', favorites: 'Wishlist', language: 'Language',
+    home: 'Home', categories: 'Categories', menu: 'Menu', profile: 'Profile',
+    settings: 'Settings', notifications: 'Notifications', markAllRead: 'Mark all read',
+    allCaughtUp: 'You’re all caught up', noActivity: 'Order updates will appear here.',
+    storeNotice: 'Store notice', newArrivals: 'New arrivals & offers',
+    newArrivalsBody: 'Discover new products and any current offers in the collection.',
+    orderPlacedNotice: 'Your order was received', orderStatusNotice: 'Order status updated',
+    orderCount: 'Orders', savedItems: 'Saved items', bagSummary: 'Bag items',
+    guestName: 'Welcome to Hikma', profileDetails: 'Your shopping overview',
+    notificationSettings: 'Notifications & alerts', enableNotifications: 'Enable order and store alerts',
+    clearReadNotifications: 'Clear read notifications', appearance: 'Appearance',
+    lightMode: 'Light mode', darkMode: 'Dark mode', storePreferences: 'Shopping & display preferences',
+    clearShoppingData: 'Clear bag and browsing history', confirmClearStore: 'Clear your bag, recent views, and search history?',
+    shoppingDataCleared: 'Bag and browsing history cleared.', recentViewed: 'Recently viewed',
+    recentSearches: 'Recent searches', languageAmharic: 'አማርኛ', languageEnglish: 'English',
+    openSettings: 'Open settings', adminLink: 'Store admin', notificationCount: 'unread notifications',
+    unread: 'unread', chooseCategory: 'Choose a category', categoryAll: 'All products',
+    supportFaq: 'Support & FAQs', accountInfo: 'Telegram profile',
+    storeNavigation: 'Store navigation', dismiss: 'Close', noCategories: 'Categories will appear here.',
   },
   am: {
     announcement: 'በጥንቃቄ የተመረጡ ዕቃዎች፣ በእንክብካቤ ይደርሳሉ።',
@@ -88,13 +107,35 @@ const words = {
     price: 'ዋጋ (ብር)', stock: 'የክምችት ብዛት', saveProduct: 'ምርት አስቀምጥ',
     uploadHint: 'ፎቶዎችን ወደዚህ ይጣሉ ወይም ለመጫን ይጫኑ (እስከ 10)', status: 'ሁኔታ አዘምን',
     customer: 'ደንበኛ', total: 'ጠቅላላ', signOut: 'ውጣ', adminLoginError: 'የአስተዳዳሪ ቁልፉ አልተቀበለም',
-    openMenu: 'ምናብር ክፈት', favorites: 'የተወደዱ', language: 'ቋንቋ',
+    openMenu: 'ሜኑ ክፈት', favorites: 'የተወደዱ', language: 'ቋንቋ',
+    home: 'ሆም', categories: 'ካታጎሪ', menu: 'ሜኑ', profile: 'ፕሮፋይል',
+    settings: 'ሴቲንግ', notifications: 'ማሳወቂያዎች', markAllRead: 'ሁሉንም እንደተነበቡ ምልክት አድርግ',
+    allCaughtUp: 'ሁሉንም አይተዋል', noActivity: 'የትዕዛዝ ዝማኔዎች እዚህ ይታያሉ።',
+    storeNotice: 'የሱቅ ማስታወቂያ', newArrivals: 'አዳዲስ ምርቶችና ቅናሾች',
+    newArrivalsBody: 'አዳዲስ ምርቶችንና ያሉ ቅናሾችን ይመልከቱ።',
+    orderPlacedNotice: 'ትዕዛዝዎ ደርሶናል', orderStatusNotice: 'የትዕዛዝ ሁኔታ ተዘምኗል',
+    orderCount: 'ትዕዛዞች', savedItems: 'የተቀመጡ ምርቶች', bagSummary: 'በቦርሳ ውስጥ',
+    guestName: 'ወደ ሂክማ እንኳን ደህና መጡ', profileDetails: 'የግዢ አጠቃላይ እይታ',
+    notificationSettings: 'ማሳወቂያዎችና ማስጠንቀቂያዎች', enableNotifications: 'የትዕዛዝና የሱቅ ማሳወቂያዎችን አሳይ',
+    clearReadNotifications: 'የተነበቡ ማሳወቂያዎችን አጽዳ', appearance: 'ገጽታ',
+    lightMode: 'ብርሃን ገጽታ', darkMode: 'ጨለማ ገጽታ', storePreferences: 'የግዢና የማሳያ ቅንብሮች',
+    clearShoppingData: 'ቦርሳና የአሰሳ ታሪክ አጽዳ', confirmClearStore: 'ቦርሳዎን፣ የታዩ ምርቶችንና የፍለጋ ታሪክን ማጽዳት ይፈልጋሉ?',
+    shoppingDataCleared: 'ቦርሳና የአሰሳ ታሪክ ተጽድቷል።', recentViewed: 'በቅርቡ የታዩ',
+    recentSearches: 'የቅርብ ፍለጋዎች', languageAmharic: 'አማርኛ', languageEnglish: 'English',
+    openSettings: 'ቅንብሮችን ክፈት', adminLink: 'የሱቅ አስተዳዳሪ', notificationCount: 'ያልተነበቡ ማሳወቂያዎች',
+    unread: 'ያልተነበቡ', chooseCategory: 'ምድብ ይምረጡ', categoryAll: 'ሁሉም ምርቶች',
+    supportFaq: 'ድጋፍና ጥያቄዎች', accountInfo: 'የቴሌግራም መገለጫ',
+    storeNavigation: 'የሱቅ አሰሳ', dismiss: 'ዝጋ', noCategories: 'ምድቦች እዚህ ይታያሉ።',
   },
 }
 
 const formatPrice = (value) => `${Number(value || 0).toLocaleString()} ETB`
 const savedValue = (key, fallback) => {
   try { return JSON.parse(localStorage.getItem(key)) ?? fallback } catch { return fallback }
+}
+const savedList = (key) => {
+  const value = savedValue(key, [])
+  return Array.isArray(value) ? value : []
 }
 
 function App({ telegramUser }) {
@@ -111,16 +152,26 @@ function App({ telegramUser }) {
   const [sort, setSort] = useState('newest')
   const [inStock, setInStock] = useState(true)
   const [showFavorites, setShowFavorites] = useState(false)
-  const [cart, setCart] = useState(() => savedValue('hikma-cart', []))
-  const [favorites, setFavorites] = useState(() => savedValue('hikma-favorites', []))
+  const [cart, setCart] = useState(() => savedList('hikma-cart'))
+  const [favorites, setFavorites] = useState(() => savedList('hikma-favorites'))
   const [selected, setSelected] = useState(null)
   const [drawer, setDrawer] = useState(false)
   const [checkout, setCheckout] = useState(false)
   const [trackingOpen, setTrackingOpen] = useState(false)
   const [supportOpen, setSupportOpen] = useState(false)
   const [notice, setNotice] = useState('')
+  const [panel, setPanel] = useState('')
+  const [mobileTab, setMobileTab] = useState('home')
+  const [notificationOpen, setNotificationOpen] = useState(false)
+  const [notifications, setNotifications] = useState(() => savedList('hikma-notifications'))
+  const [notificationsEnabled, setNotificationsEnabled] = useState(() => savedValue('hikma-notifications-enabled', true))
+  const [localOrders, setLocalOrders] = useState(() => savedList('hikma-local-orders'))
+  const [recentlyViewed, setRecentlyViewed] = useState(() => savedList('hikma-recently-viewed'))
+  const [searchHistory, setSearchHistory] = useState(() => savedList('hikma-search-history'))
+  const notificationRef = useRef(null)
   const t = words[language]
   const am = language === 'am'
+  const unreadCount = notificationsEnabled ? notifications.filter((item) => !item.read).length : 0
   const displayedProducts = showFavorites
     ? products.filter((product) => favorites.includes(product.id))
     : products
@@ -132,6 +183,31 @@ function App({ telegramUser }) {
   useEffect(() => { localStorage.setItem('hikma-language', language) }, [language])
   useEffect(() => { localStorage.setItem('hikma-cart', JSON.stringify(cart)) }, [cart])
   useEffect(() => { localStorage.setItem('hikma-favorites', JSON.stringify(favorites)) }, [favorites])
+  useEffect(() => { localStorage.setItem('hikma-notifications', JSON.stringify(notifications)) }, [notifications])
+  useEffect(() => { localStorage.setItem('hikma-notifications-enabled', JSON.stringify(notificationsEnabled)) }, [notificationsEnabled])
+  useEffect(() => { localStorage.setItem('hikma-local-orders', JSON.stringify(localOrders)) }, [localOrders])
+  useEffect(() => { localStorage.setItem('hikma-recently-viewed', JSON.stringify(recentlyViewed)) }, [recentlyViewed])
+  useEffect(() => { localStorage.setItem('hikma-search-history', JSON.stringify(searchHistory)) }, [searchHistory])
+  useEffect(() => {
+    if (!notificationOpen) return undefined
+    const closeOnOutsideClick = (event) => {
+      if (!notificationRef.current?.contains(event.target)) setNotificationOpen(false)
+    }
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') setNotificationOpen(false)
+    }
+    const closeOnMobileResize = () => {
+      if (window.innerWidth < 768) setNotificationOpen(false)
+    }
+    document.addEventListener('pointerdown', closeOnOutsideClick)
+    window.addEventListener('keydown', closeOnEscape)
+    window.addEventListener('resize', closeOnMobileResize)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsideClick)
+      window.removeEventListener('keydown', closeOnEscape)
+      window.removeEventListener('resize', closeOnMobileResize)
+    }
+  }, [notificationOpen])
   useEffect(() => {
     const params = new URLSearchParams()
     if (query.trim()) params.set('q', query.trim())
@@ -172,6 +248,84 @@ function App({ telegramUser }) {
   const toggleFavorite = (id) => setFavorites((current) => (
     current.includes(id) ? current.filter((value) => value !== id) : [...current, id]
   ))
+  const openProduct = (product) => {
+    setRecentlyViewed((current) => [product.id, ...current.filter((id) => id !== product.id)].slice(0, 20))
+    setSelected(product)
+  }
+  const openPanel = (name) => {
+    setNotificationOpen(false)
+    setPanel(name)
+    setMobileTab(name === 'categories' ? 'categories' : name === 'profile' ? 'profile' : name === 'menu' ? 'menu' : mobileTab)
+  }
+  const closePanel = () => setPanel('')
+  const goHome = () => {
+    setPanel('')
+    setShowFavorites(false)
+    setCategory('all')
+    setMobileTab('home')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+  const goCategories = () => openPanel('categories')
+  const chooseCategory = (value) => {
+    setCategory(value)
+    setShowFavorites(false)
+    setPanel('')
+    setMobileTab('home')
+    window.setTimeout(() => document.getElementById('collection')?.scrollIntoView({ behavior: 'smooth' }), 0)
+  }
+  const goFavorites = () => {
+    setPanel('')
+    setShowFavorites(true)
+    setCategory('all')
+    setMobileTab('home')
+    window.setTimeout(() => document.getElementById('collection')?.scrollIntoView({ behavior: 'smooth' }), 0)
+  }
+  const goHelp = () => {
+    setPanel('')
+    setMobileTab('menu')
+    window.setTimeout(() => document.getElementById('help')?.scrollIntoView({ behavior: 'smooth' }), 0)
+  }
+  const recordSearch = (value) => {
+    const cleaned = value.trim()
+    if (!cleaned) return
+    setSearchHistory((current) => [cleaned, ...current.filter((item) => item.toLowerCase() !== cleaned.toLowerCase())].slice(0, 10))
+  }
+  const addNotification = (item) => {
+    if (notificationsEnabled) setNotifications((current) => [item, ...current].slice(0, 40))
+  }
+  const recordOrder = (order) => {
+    const orderNumber = order.order_number
+    const status = order.status || 'Pending'
+    setLocalOrders((current) => [{ order_number: orderNumber, status }, ...current.filter((item) => item.order_number !== orderNumber)].slice(0, 50))
+    addNotification({ id: `order-${orderNumber}`, type: 'order', orderNumber, status, read: false, createdAt: Date.now() })
+  }
+  const recordTrackedOrder = (order) => {
+    const previous = localOrders.find((item) => item.order_number === order.order_number)
+    setLocalOrders((current) => [
+      { order_number: order.order_number, status: order.status },
+      ...current.filter((item) => item.order_number !== order.order_number),
+    ].slice(0, 50))
+    if (previous && previous.status !== order.status) {
+      addNotification({
+        id: `status-${order.order_number}-${Date.now()}`,
+        type: 'status',
+        orderNumber: order.order_number,
+        status: order.status,
+        read: false,
+        createdAt: Date.now(),
+      })
+    }
+  }
+  const clearShoppingData = () => {
+    if (!window.confirm(t.confirmClearStore)) return
+    setCart([])
+    setRecentlyViewed([])
+    setSearchHistory([])
+    setQuery('')
+    setShowFavorites(false)
+    setNotice(t.shoppingDataCleared)
+    window.setTimeout(() => setNotice(''), 3000)
+  }
 
   if (window.location.pathname === '/admin') {
     return <AdminPage t={t} am={am} />
@@ -196,14 +350,27 @@ function App({ telegramUser }) {
             <button onClick={() => setLanguage(am ? 'en' : 'am')} className="rounded-full px-3 py-2 text-xs font-semibold transition hover:bg-black/5 dark:hover:bg-white/10" aria-label={t.language}>
               {am ? 'EN' : 'አማ'}
             </button>
-            <button onClick={() => setDark(!dark)} className="grid size-10 place-items-center rounded-full transition hover:bg-black/5 dark:hover:bg-white/10" aria-label={dark ? 'Light mode' : 'Dark mode'}>
+            <button onClick={() => setDark(!dark)} className="grid size-10 place-items-center rounded-full transition hover:bg-black/5 dark:hover:bg-white/10" aria-label={dark ? t.lightMode : t.darkMode} title={dark ? t.lightMode : t.darkMode}>
               {dark ? <Sun size={18} /> : <Moon size={18} />}
             </button>
             <button onClick={() => setShowFavorites(!showFavorites)} className={`relative grid size-10 place-items-center rounded-full transition hover:bg-black/5 dark:hover:bg-white/10 ${showFavorites ? 'text-brand-blue-active' : ''}`} aria-label={t.favorites}>
               <Heart size={18} fill={showFavorites ? 'currentColor' : 'none'} />
               {favorites.length > 0 && <span className="absolute right-0 top-0 text-[9px]">{favorites.length}</span>}
             </button>
-            <button onClick={() => setTrackingOpen(true)} className="hidden rounded-full px-3 py-2 text-sm transition hover:bg-black/5 dark:hover:bg-white/10 sm:block">{t.tracking}</button>
+            <div className="relative hidden md:block" ref={notificationRef}>
+              <button onClick={() => setNotificationOpen((current) => !current)} className="relative grid size-10 place-items-center rounded-full transition hover:bg-black/5 dark:hover:bg-white/10" aria-label={t.notifications} aria-expanded={notificationOpen} aria-haspopup="dialog">
+                <Bell size={18} />
+                {unreadCount > 0 && <span className="absolute right-0 top-0 grid min-h-4 min-w-4 place-items-center rounded-full bg-brand-orange px-1 text-[9px] font-bold text-slate-950" aria-label={`${unreadCount} ${t.notificationCount}`}>{unreadCount}</span>}
+              </button>
+              {notificationOpen && <NotificationsPopover notifications={notifications} products={products} t={t} onBrowse={() => { setNotificationOpen(false); document.getElementById('collection')?.scrollIntoView({ behavior: 'smooth' }) }} onMarkAllRead={() => setNotifications((current) => current.map((item) => ({ ...item, read: true })))} />}
+            </div>
+            <button onClick={() => openPanel('menu')} className="hidden size-10 place-items-center rounded-full transition hover:bg-black/5 dark:hover:bg-white/10 md:grid" aria-label={t.menu} title={t.menu}>
+              <Menu size={18} />
+            </button>
+            <button onClick={() => openPanel('settings')} className="hidden size-10 place-items-center rounded-full transition hover:bg-black/5 dark:hover:bg-white/10 md:grid" aria-label={t.settings} title={t.settings}>
+              <Settings size={18} />
+            </button>
+            <button onClick={() => setTrackingOpen(true)} className="hidden rounded-full px-3 py-2 text-sm transition hover:bg-black/5 dark:hover:bg-white/10 lg:block">{t.tracking}</button>
             <button onClick={() => setDrawer(true)} className="relative grid size-10 place-items-center rounded-full bg-brand-blue text-white transition hover:bg-brand-blue-hover" aria-label={t.bag}>
               <ShoppingBag size={18} />
               {quantity > 0 && <span className="absolute -right-1 -top-1 grid size-[18px] place-items-center rounded-full bg-brand-orange text-[10px] font-bold text-slate-950">{quantity}</span>}
@@ -212,7 +379,7 @@ function App({ telegramUser }) {
         </div>
       </header>
 
-      <main>
+      <main className="pb-20 md:pb-8">
         <section className="mx-auto max-w-[1440px] px-4 pt-5 sm:px-7 sm:pt-8 lg:px-12">
           <div className="hero-grid relative min-h-[430px] overflow-hidden rounded-[26px] bg-brand-blue sm:min-h-[500px] sm:rounded-[34px] lg:min-h-[550px]">
             <div className="relative z-10 flex min-h-[430px] max-w-[690px] flex-col items-start justify-center px-7 py-12 text-white sm:min-h-[500px] sm:px-14 lg:min-h-[550px] lg:px-[74px]">
@@ -238,7 +405,7 @@ function App({ telegramUser }) {
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
               <label className="flex h-11 items-center gap-2.5 rounded-full border border-slate-200 bg-white px-4 transition focus-within:border-brand-blue focus-within:ring-2 focus-within:ring-brand-blue/20 dark:border-slate-700 dark:bg-slate-900">
                 <Search size={16} className="text-slate-500" />
-                <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t.search} className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400 sm:w-44" />
+                <input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && recordSearch(query)} placeholder={t.search} className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400 sm:w-44" />
               </label>
               <div className="flex gap-2">
                 <label className="relative flex h-11 items-center gap-2 rounded-full border border-slate-200 bg-white px-4 text-sm dark:border-slate-700 dark:bg-slate-900">
@@ -267,7 +434,7 @@ function App({ telegramUser }) {
           ) : (
             <div className="grid grid-cols-2 gap-x-3 gap-y-7 sm:grid-cols-3 sm:gap-x-5 sm:gap-y-9 lg:grid-cols-4 lg:gap-x-6">
               {displayedProducts.map((product) => (
-                <ProductCard key={product.id} product={product} am={am} t={t} favorite={favorites.includes(product.id)} onFavorite={() => toggleFavorite(product.id)} onClick={() => setSelected(product)} onAdd={() => addToCart(product)} />
+                <ProductCard key={product.id} product={product} am={am} t={t} favorite={favorites.includes(product.id)} onFavorite={() => toggleFavorite(product.id)} onClick={() => openProduct(product)} onAdd={() => addToCart(product)} />
               ))}
             </div>
           )}
@@ -284,7 +451,7 @@ function App({ telegramUser }) {
         <HelpSection t={t} supportUrl={supportUsername ? `https://t.me/${supportUsername}` : 'https://t.me/'} onTrack={() => setTrackingOpen(true)} onSupport={() => setSupportOpen(true)} />
       </main>
 
-      <footer className="border-t border-slate-200 dark:border-slate-700">
+      <footer className="border-t border-slate-200 pb-20 dark:border-slate-700 md:pb-0">
         <div className="mx-auto flex max-w-[1440px] flex-col gap-3 px-4 py-8 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:px-7 lg:px-12">
           <a href="/" aria-label="Hikma home" className="inline-flex w-fit items-center">
             <img src="/hikma-logo.png" alt="Hikma Online Shopping — Shop Smart, Buy Easy, Save More" width="64" height="64" className="size-16 bg-white object-contain" />
@@ -294,10 +461,15 @@ function App({ telegramUser }) {
         </div>
       </footer>
 
+      <MobileBottomNavigation active={mobileTab} t={t} onHome={goHome} onCategories={goCategories} onMenu={() => openPanel('menu')} onProfile={() => openPanel('profile')} />
+      {panel === 'menu' && <MenuPanel t={t} onClose={closePanel} onHome={goHome} onCategories={goCategories} onTrack={() => { closePanel(); setTrackingOpen(true) }} onFavorites={goFavorites} onHelp={goHelp} onSupport={() => { closePanel(); setSupportOpen(true) }} onSettings={() => openPanel('settings')} />}
+      {panel === 'categories' && <CategoriesPanel categories={categories} category={category} am={am} t={t} onClose={closePanel} onChoose={chooseCategory} />}
+      {panel === 'profile' && <ProfilePanel telegramUser={telegramUser} localOrders={localOrders} favorites={favorites} quantity={quantity} t={t} onClose={closePanel} onTrack={() => { closePanel(); setTrackingOpen(true) }} onFavorites={goFavorites} onSettings={() => openPanel('settings')} />}
+      {panel === 'settings' && <SettingsPanel t={t} am={am} dark={dark} quantity={quantity} notificationsEnabled={notificationsEnabled} notifications={notifications} recentlyViewed={recentlyViewed} searchHistory={searchHistory} onClose={closePanel} onLanguage={setLanguage} onTheme={setDark} onToggleNotifications={() => setNotificationsEnabled((current) => !current)} onClearRead={() => setNotifications((current) => current.filter((item) => !item.read))} onClearShoppingData={clearShoppingData} onTrack={() => { closePanel(); setTrackingOpen(true) }} onHelp={goHelp} onSupport={() => { closePanel(); setSupportOpen(true) }} />}
       {notice && products.length > 0 && <div role="status" className="fixed bottom-5 left-1/2 z-[80] -translate-x-1/2 rounded-full bg-brand-blue px-5 py-3 text-sm text-white shadow-xl">{notice}</div>}
       {selected && <ProductModal product={selected} am={am} t={t} favorite={favorites.includes(selected.id)} onFavorite={() => toggleFavorite(selected.id)} onClose={() => setSelected(null)} onAdd={(amount) => { addToCart(selected, amount); setDrawer(true) }} />}
-      {drawer && <CartDrawer cart={cart} t={t} am={am} initialName={[telegramUser?.first_name, telegramUser?.last_name].filter(Boolean).join(' ')} subtotal={subtotal} checkout={checkout} setCheckout={setCheckout} onChange={changeQuantity} onRemove={(id) => setCart((current) => current.filter((item) => item.product.id !== id))} onClose={() => { setDrawer(false); setCheckout(false) }} onOrder={(order) => { setCart([]); setCheckout(false); setNotice(`${t.orderSuccess} · ${order.order_number}`); setTimeout(() => setNotice(''), 6000) }} />}
-      {trackingOpen && <TrackingModal t={t} onClose={() => setTrackingOpen(false)} />}
+      {drawer && <CartDrawer cart={cart} t={t} am={am} initialName={[telegramUser?.first_name, telegramUser?.last_name].filter(Boolean).join(' ')} subtotal={subtotal} checkout={checkout} setCheckout={setCheckout} onChange={changeQuantity} onRemove={(id) => setCart((current) => current.filter((item) => item.product.id !== id))} onClose={() => { setDrawer(false); setCheckout(false) }} onOrder={(order) => { recordOrder(order); setCart([]); setCheckout(false); setNotice(`${t.orderSuccess} · ${order.order_number}`); setTimeout(() => setNotice(''), 6000) }} />}
+      {trackingOpen && <TrackingModal t={t} onClose={() => setTrackingOpen(false)} onTracked={recordTrackedOrder} />}
       {supportOpen && <SupportModal t={t} supportUrl={supportUsername ? `https://t.me/${supportUsername}` : 'https://t.me/'} onClose={() => setSupportOpen(false)} />}
       {telegramUser?.first_name && <span className="sr-only">{telegramUser.first_name}</span>}
     </div>
@@ -468,7 +640,7 @@ function Field({ label, value, onChange, type = 'text', required = false, ...pro
   return <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">{label}<input type={type} required={required} value={value} onChange={onChange} {...props} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white" /></label>
 }
 
-function TrackingModal({ t, onClose }) {
+function TrackingModal({ t, onClose, onTracked }) {
   const [orderNumber, setOrderNumber] = useState('')
   const [phone, setPhone] = useState('')
   const [order, setOrder] = useState(null)
@@ -481,7 +653,11 @@ function TrackingModal({ t, onClose }) {
       setBusy(false)
       return
     }
-    try { setOrder(await api('/api/orders/track', { method: 'POST', body: JSON.stringify({ order_number: orderNumber, phone }) })) }
+    try {
+      const trackedOrder = await api('/api/orders/track', { method: 'POST', body: JSON.stringify({ order_number: orderNumber, phone }) })
+      setOrder(trackedOrder)
+      onTracked(trackedOrder)
+    }
     catch (problem) { setError(problem.message) }
     finally { setBusy(false) }
   }
@@ -544,6 +720,215 @@ function HelpSection({ t, supportUrl, onTrack, onSupport }) {
       <div className="divide-y divide-slate-200 dark:divide-slate-700">
         {[[t.shippingQ, t.shippingA], [t.paymentQ, t.paymentA], [t.returnsQ, t.returnsA]].map(([question, answer]) => <details key={question} className="group py-5 first:pt-0"><summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-sm font-medium">{question}<Plus size={16} className="shrink-0 transition group-open:rotate-45" /></summary><p className="mt-3 max-w-[600px] text-sm leading-6 text-slate-500">{answer}</p></details>)}
       </div>
+    </div>
+  </section>
+}
+
+function MobileBottomNavigation({ active, t, onHome, onCategories, onMenu, onProfile }) {
+  const items = [
+    { id: 'home', label: t.home, Icon: House, onClick: onHome },
+    { id: 'categories', label: t.categories, Icon: LayoutGrid, onClick: onCategories },
+    { id: 'menu', label: t.menu, Icon: Menu, onClick: onMenu },
+    { id: 'profile', label: t.profile, Icon: UserRound, onClick: onProfile },
+  ]
+  return <nav aria-label={t.storeNavigation} className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-8px_24px_rgb(15_23_42_/_8%)] backdrop-blur-xl dark:border-slate-700 dark:bg-slate-900/95 md:hidden">
+    <div className="mx-auto grid min-h-16 max-w-lg grid-cols-4">
+      {items.map(({ id, label, Icon, onClick }) => {
+        const selected = active === id
+        return <button key={id} type="button" onClick={onClick} aria-label={label} aria-current={selected ? 'page' : undefined} className={`flex min-w-0 flex-col items-center justify-center gap-1 px-1 text-[10px] font-medium transition sm:text-xs ${selected ? 'text-brand-blue' : 'text-slate-500 dark:text-slate-300'}`}>
+          <span className="relative grid size-8 place-items-center">
+            <Icon size={20} strokeWidth={selected ? 2.4 : 1.8} />
+            {selected && <span className="absolute -bottom-0.5 size-1 rounded-full bg-brand-orange" />}
+          </span>
+          <span className="max-w-full truncate">{label}</span>
+        </button>
+      })}
+    </div>
+  </nav>
+}
+
+function DrawerPanel({ title, subtitle, t, onClose, children }) {
+  const titleId = useId()
+  const subtitleId = useId()
+  useEffect(() => {
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [onClose])
+
+  return <div className="fixed inset-0 z-[70]">
+    <button type="button" aria-label={t.dismiss} className="modal-backdrop absolute inset-0" onClick={onClose} />
+    <aside role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={subtitle ? subtitleId : undefined} tabIndex={-1} className="absolute inset-x-0 bottom-0 flex max-h-[88vh] flex-col overflow-hidden rounded-t-[28px] bg-white shadow-2xl dark:bg-slate-900 md:inset-y-0 md:left-auto md:right-0 md:h-full md:max-h-full md:w-[440px] md:rounded-l-3xl md:rounded-tr-none">
+      <div className="mx-auto mt-3 h-1 w-10 shrink-0 rounded-full bg-slate-300 dark:bg-slate-600 md:hidden" />
+      <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-5 dark:border-slate-700 sm:px-7">
+        <div className="min-w-0">
+          <h2 id={titleId} className="text-xl font-semibold">{title}</h2>
+          {subtitle && <p id={subtitleId} className="mt-1 text-sm text-slate-500 dark:text-slate-400">{subtitle}</p>}
+        </div>
+        <button type="button" autoFocus onClick={onClose} className="grid size-9 shrink-0 place-items-center rounded-full text-slate-500 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800" aria-label={t.dismiss}>
+          <X size={18} />
+        </button>
+      </div>
+      <div className="soft-scrollbar min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-7">{children}</div>
+    </aside>
+  </div>
+}
+
+function PanelAction({ Icon, label, description, onClick }) {
+  return <button type="button" onClick={onClick} className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 text-left transition hover:border-brand-blue/40 hover:bg-blue-50/60 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800">
+    <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-blue-50 text-brand-blue dark:bg-slate-800"><Icon size={18} /></span>
+    <span className="min-w-0 flex-1">
+      <span className="block text-sm font-medium">{label}</span>
+      {description && <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">{description}</span>}
+    </span>
+    <ChevronRight size={16} className="shrink-0 text-slate-400" />
+  </button>
+}
+
+function MenuPanel({ t, onClose, onHome, onCategories, onTrack, onFavorites, onHelp, onSupport, onSettings }) {
+  return <DrawerPanel title={t.menu} subtitle={t.supportFaq} t={t} onClose={onClose}>
+    <div className="space-y-2.5">
+      <PanelAction Icon={House} label={t.home} onClick={onHome} />
+      <PanelAction Icon={LayoutGrid} label={t.categories} onClick={onCategories} />
+      <PanelAction Icon={ShoppingBag} label={t.tracking} onClick={onTrack} />
+      <PanelAction Icon={Heart} label={t.favorites} onClick={onFavorites} />
+      <PanelAction Icon={BookOpen} label={t.faqs} onClick={onHelp} />
+      <PanelAction Icon={CircleHelp} label={t.support} onClick={onSupport} />
+      <a href="/admin" className="flex items-center gap-3 rounded-2xl border border-slate-200 p-3 transition hover:border-brand-blue/40 hover:bg-blue-50/60 dark:border-slate-700 dark:hover:bg-slate-800">
+        <span className="grid size-10 place-items-center rounded-xl bg-blue-50 text-brand-blue dark:bg-slate-800"><Store size={18} /></span>
+        <span className="text-sm font-medium">{t.adminLink}</span>
+        <ArrowRight size={16} className="ml-auto text-slate-400" />
+      </a>
+      <PanelAction Icon={Settings} label={t.settings} onClick={onSettings} />
+    </div>
+  </DrawerPanel>
+}
+
+function CategoriesPanel({ categories, category, am, t, onClose, onChoose }) {
+  const choices = ['all', ...categories]
+  return <DrawerPanel title={t.categories} subtitle={t.chooseCategory} t={t} onClose={onClose}>
+    <div className="space-y-2">
+      {choices.map((value) => {
+        const label = value === 'all' ? t.categoryAll : am ? categoryLabel(value, true) : value
+        const selected = category === value
+        return <button key={value} type="button" onClick={() => onChoose(value)} aria-current={selected ? 'true' : undefined} className={`flex w-full items-center justify-between rounded-2xl border px-4 py-4 text-left text-sm font-medium transition ${selected ? 'border-brand-blue bg-brand-blue text-white' : 'border-slate-200 bg-white hover:border-brand-blue/40 dark:border-slate-700 dark:bg-slate-900'}`}>
+          <span>{label}</span>{selected && <Check size={17} />}
+        </button>
+      })}
+      {categories.length === 0 && <p className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500 dark:bg-slate-800 dark:text-slate-300">{t.noCategories}</p>}
+    </div>
+  </DrawerPanel>
+}
+
+function ProfilePanel({ telegramUser, localOrders, favorites, quantity, t, onClose, onTrack, onFavorites, onSettings }) {
+  const name = [telegramUser?.first_name, telegramUser?.last_name].filter(Boolean).join(' ') || t.guestName
+  return <DrawerPanel title={t.profile} subtitle={t.profileDetails} t={t} onClose={onClose}>
+    <div className="flex items-center gap-4 rounded-2xl bg-blue-50 p-4 dark:bg-slate-800">
+      <span className="grid size-14 shrink-0 place-items-center rounded-full bg-white text-brand-blue dark:bg-slate-900"><UserRound size={25} /></span>
+      <div className="min-w-0">
+        <p className="truncate font-semibold">{name}</p>
+        <p className="mt-1 truncate text-sm text-slate-500 dark:text-slate-300">{telegramUser?.username ? `@${telegramUser.username}` : telegramUser?.language_code || (telegramUser ? t.accountInfo : t.profileDetails)}</p>
+      </div>
+    </div>
+    <div className="mt-4 grid grid-cols-3 gap-2">
+      {[[t.orderCount, localOrders.length], [t.savedItems, favorites.length], [t.bagSummary, quantity]].map(([label, count]) => <div key={label} className="rounded-2xl border border-slate-200 p-3 text-center dark:border-slate-700">
+        <p className="text-lg font-semibold text-brand-blue">{count}</p><p className="mt-1 text-[11px] leading-4 text-slate-500 dark:text-slate-400">{label}</p>
+      </div>)}
+    </div>
+    <div className="mt-5 space-y-2.5">
+      <PanelAction Icon={ShoppingBag} label={t.tracking} description={localOrders[0]?.order_number || t.trackTitle} onClick={onTrack} />
+      <PanelAction Icon={Heart} label={t.favorites} onClick={onFavorites} />
+      <PanelAction Icon={Settings} label={t.settings} onClick={onSettings} />
+    </div>
+  </DrawerPanel>
+}
+
+function SettingsPanel({ t, am, dark, quantity, notificationsEnabled, notifications, recentlyViewed, searchHistory, onClose, onLanguage, onTheme, onToggleNotifications, onClearRead, onClearShoppingData, onTrack, onHelp, onSupport }) {
+  const readCount = notifications.filter((item) => item.read).length
+  return <DrawerPanel title={t.settings} subtitle={t.storePreferences} t={t} onClose={onClose}>
+    <section>
+      <h3 className="text-sm font-semibold">{t.language}</h3>
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        {[['en', t.languageEnglish], ['am', t.languageAmharic]].map(([value, label]) => <button key={value} type="button" onClick={() => onLanguage(value)} aria-pressed={am === (value === 'am')} className={`rounded-xl border px-4 py-3 text-sm font-medium transition ${am === (value === 'am') ? 'border-brand-blue bg-blue-50 text-brand-blue dark:bg-slate-800' : 'border-slate-200 dark:border-slate-700'}`}>{label}</button>)}
+      </div>
+    </section>
+    <section className="mt-6">
+      <h3 className="text-sm font-semibold">{t.appearance}</h3>
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        {[[false, t.lightMode, Sun], [true, t.darkMode, Moon]].map(([value, label, Icon]) => <button key={String(value)} type="button" onClick={() => onTheme(value)} aria-pressed={dark === value} className={`flex items-center justify-center gap-2 rounded-xl border px-3 py-3 text-sm font-medium transition ${dark === value ? 'border-brand-blue bg-blue-50 text-brand-blue dark:bg-slate-800' : 'border-slate-200 dark:border-slate-700'}`}><Icon size={16} />{label}</button>)}
+      </div>
+    </section>
+    <section className="mt-6">
+      <h3 className="text-sm font-semibold">{t.notificationSettings}</h3>
+      <div className="mt-2 flex items-center justify-between gap-4 rounded-2xl border border-slate-200 p-4 dark:border-slate-700">
+        <span className="text-sm">{t.enableNotifications}</span>
+        <button type="button" role="switch" aria-checked={notificationsEnabled} aria-label={t.enableNotifications} onClick={onToggleNotifications} className={`relative h-6 w-11 shrink-0 rounded-full transition ${notificationsEnabled ? 'bg-brand-blue' : 'bg-slate-300 dark:bg-slate-600'}`}>
+          <span className={`absolute top-1 size-4 rounded-full bg-white transition ${notificationsEnabled ? 'left-6' : 'left-1'}`} />
+        </button>
+      </div>
+      <button type="button" onClick={onClearRead} disabled={!readCount} className="mt-2 flex w-full items-center justify-between rounded-xl px-1 py-2 text-left text-sm text-brand-blue-active disabled:cursor-not-allowed disabled:opacity-40">
+        <span>{t.clearReadNotifications}</span><span>{readCount}</span>
+      </button>
+    </section>
+    <section className="mt-6">
+      <h3 className="text-sm font-semibold">{t.storePreferences}</h3>
+      <div className="mt-2 grid grid-cols-3 gap-2 text-center">
+        {[[t.bagSummary, quantity], [t.recentViewed, recentlyViewed.length], [t.recentSearches, searchHistory.length]].map(([label, count]) => <div key={label} className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800">
+          <p className="font-semibold">{count}</p><p className="mt-1 text-[10px] leading-4 text-slate-500 dark:text-slate-400">{label}</p>
+        </div>)}
+      </div>
+      <button type="button" onClick={onClearShoppingData} disabled={!quantity && !recentlyViewed.length && !searchHistory.length} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm font-medium text-slate-900 transition hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-orange-900 dark:bg-orange-950/30 dark:text-orange-100">
+        <Trash2 size={16} />{t.clearShoppingData}
+      </button>
+    </section>
+    <section className="mt-6">
+      <h3 className="text-sm font-semibold">{t.supportFaq}</h3>
+      <div className="mt-2 space-y-2.5">
+        <PanelAction Icon={ShoppingBag} label={t.tracking} onClick={onTrack} />
+        <PanelAction Icon={BookOpen} label={t.faqs} onClick={onHelp} />
+        <PanelAction Icon={CircleHelp} label={t.support} onClick={onSupport} />
+      </div>
+    </section>
+  </DrawerPanel>
+}
+
+function NotificationsPopover({ notifications, products, t, onBrowse, onMarkAllRead }) {
+  const unreadCount = notifications.filter((item) => !item.read).length
+  return <section role="dialog" aria-label={t.notifications} className="absolute right-0 top-[calc(100%+12px)] z-[75] max-h-[min(75vh,620px)] w-[min(90vw,380px)] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+    <div className="flex items-center justify-between gap-3">
+      <div><h2 className="font-semibold">{t.notifications}</h2><p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{unreadCount} {t.unread}</p></div>
+      <button type="button" onClick={onMarkAllRead} disabled={!unreadCount} className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium text-brand-blue-active hover:bg-blue-50 disabled:opacity-40 dark:hover:bg-slate-800"><CheckCheck size={14} />{t.markAllRead}</button>
+    </div>
+    {notifications.length === 0 && <div role="status" className="my-4 rounded-xl bg-slate-50 px-3 py-4 text-center dark:bg-slate-800">
+      <span className="mx-auto grid size-9 place-items-center rounded-full bg-white text-brand-blue dark:bg-slate-900"><Bell size={17} /></span>
+      <p className="mt-2 text-sm font-medium">{t.allCaughtUp}</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{t.noActivity}</p>
+    </div>}
+    {notifications.length > 0 && <div className="mt-3 space-y-2">
+      {notifications.slice(0, 8).map((item) => <div key={item.id} className={`rounded-xl border p-3 ${item.read ? 'border-slate-200 dark:border-slate-700' : 'border-blue-200 bg-blue-50/70 dark:border-blue-900 dark:bg-slate-800'}`}>
+        <div className="flex items-start gap-2.5">
+          <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-white text-brand-blue dark:bg-slate-900"><ShoppingBag size={15} /></span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium">{item.type === 'status' ? t.orderStatusNotice : t.orderPlacedNotice}</p>
+            <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-300">{item.orderNumber} · {item.status}</p>
+          </div>
+          {!item.read && <span className="mt-2 size-2 shrink-0 rounded-full bg-brand-orange" aria-label={t.unread} />}
+        </div>
+      </div>)}
+    </div>}
+    <div className="mt-3 rounded-xl border border-orange-200 bg-orange-50/70 p-3 dark:border-orange-900 dark:bg-orange-950/20">
+      <div className="flex gap-2.5">
+        <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-white text-brand-orange dark:bg-slate-900"><Store size={15} /></span>
+        <div><p className="text-sm font-medium">{t.storeNotice}</p><p className="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-300">{t.announcement}</p></div>
+      </div>
+    </div>
+    <div className="mt-2 rounded-xl border border-slate-200 p-3 dark:border-slate-700">
+      <div className="flex gap-2.5">
+        <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-blue-50 text-brand-blue dark:bg-slate-800"><Sparkles size={15} /></span>
+        <div className="min-w-0 flex-1"><p className="text-sm font-medium">{t.newArrivals}</p><p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-300">{t.newArrivalsBody}</p><p className="mt-1 text-[11px] text-slate-400">{products.length} {t.products.toLowerCase()}</p></div>
+      </div>
+      <button type="button" onClick={onBrowse} className="mt-3 w-full rounded-lg bg-brand-blue px-3 py-2 text-xs font-semibold text-white transition hover:bg-brand-blue-hover">{t.explore}</button>
     </div>
   </section>
 }
