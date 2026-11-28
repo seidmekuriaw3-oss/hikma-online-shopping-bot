@@ -145,6 +145,12 @@ const savedList = (key) => {
   return Array.isArray(value) ? value : []
 }
 
+const HeaderTooltip = ({ label, alignRight = false }) => (
+  <span aria-hidden="true" className={`pointer-events-none absolute top-full z-50 mt-2 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 dark:border-slate-600 dark:bg-slate-800 dark:text-white ${alignRight ? 'left-auto right-0 translate-x-0' : 'left-1/2 -translate-x-1/2'}`}>
+    {label}
+  </span>
+)
+
 function App({ telegramUser }) {
   const [language, setLanguage] = useState(() => localStorage.getItem('hikma-language') || 'en')
   const [dark, setDark] = useState(() => {
@@ -351,39 +357,48 @@ function App({ telegramUser }) {
             <input ref={searchInputRef} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && recordSearch(query)} placeholder={t.search} className="w-full min-w-0 bg-transparent text-sm outline-none placeholder:text-slate-400" />
           </label>
           <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
-            <button onClick={() => setLanguage(am ? 'en' : 'am')} className="grid size-10 place-items-center rounded-xl border border-slate-200 bg-white text-brand-blue shadow-sm transition hover:border-brand-blue/50 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-800 dark:text-blue-300 dark:hover:bg-slate-700" aria-label={t.language}>
+            <button onClick={() => setLanguage(am ? 'en' : 'am')} className="group relative grid size-10 place-items-center rounded-xl border border-slate-200 bg-white text-brand-blue shadow-sm transition hover:border-brand-blue/50 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-800 dark:text-blue-300 dark:hover:bg-slate-700" aria-label={t.language}>
               <Languages size={18} aria-hidden="true" />
+              <HeaderTooltip label={t.language} />
             </button>
-            <button onClick={() => setDark(!dark)} className="grid size-10 place-items-center rounded-xl border border-slate-200 bg-white transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700" aria-label={dark ? t.lightMode : t.darkMode}>
+            <button onClick={() => setDark(!dark)} className="group relative grid size-10 place-items-center rounded-xl border border-slate-200 bg-white transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700" aria-label={dark ? t.lightMode : t.darkMode}>
               {dark ? <Sun size={18} aria-hidden="true" /> : <Moon size={18} aria-hidden="true" />}
+              <HeaderTooltip label={dark ? t.lightMode : t.darkMode} />
             </button>
             <div className="relative hidden lg:block" ref={notificationRef}>
-              <button onClick={() => setNotificationOpen((current) => !current)} className="relative grid size-10 place-items-center rounded-xl border border-slate-200 bg-white transition hover:border-brand-blue/40 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700" aria-label={unreadCount > 0 ? `${t.notifications} (${unreadCount})` : t.notifications} aria-expanded={notificationOpen} aria-haspopup="dialog">
+              <button onClick={() => setNotificationOpen((current) => !current)} className="group relative grid size-10 place-items-center rounded-xl border border-slate-200 bg-white transition hover:border-brand-blue/40 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700" aria-label={unreadCount > 0 ? `${t.notifications} (${unreadCount})` : t.notifications} aria-expanded={notificationOpen} aria-haspopup="dialog">
                 <Bell size={18} aria-hidden="true" />
                 {unreadCount > 0 && <span className="absolute -right-1 -top-1 grid min-h-4 min-w-4 place-items-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white ring-2 ring-white dark:ring-slate-800" aria-hidden="true">{unreadCount}</span>}
+                <HeaderTooltip label={t.notifications} />
               </button>
               {notificationOpen && <NotificationsPopover notifications={notifications} products={products} t={t} onBrowse={() => { setNotificationOpen(false); document.getElementById('collection')?.scrollIntoView({ behavior: 'smooth' }) }} onMarkAllRead={() => setNotifications((current) => current.map((item) => ({ ...item, read: true })))} />}
             </div>
-            <button onClick={() => setDrawer(true)} className="relative grid size-10 shrink-0 place-items-center rounded-xl bg-brand-blue text-white shadow-sm transition hover:bg-brand-blue-hover" aria-label={`${t.bag} (${quantity})`}>
+            <button onClick={() => setDrawer(true)} className="group relative grid size-10 shrink-0 place-items-center rounded-xl bg-brand-blue text-white shadow-sm transition hover:bg-brand-blue-hover" aria-label={`${t.bag} (${quantity})`}>
               <ShoppingCart size={19} aria-hidden="true" />
               <span className="absolute -right-1 -top-1 grid min-h-4 min-w-4 place-items-center rounded-full bg-brand-orange px-1 text-[9px] font-bold leading-none text-slate-950" aria-hidden="true">{quantity}</span>
+              <HeaderTooltip label={t.bag} alignRight />
             </button>
-            <button onClick={() => setShowFavorites(!showFavorites)} className={`relative hidden size-10 place-items-center rounded-xl border border-slate-200 bg-white transition hover:border-brand-blue/40 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 xl:grid ${showFavorites ? 'text-brand-blue-active' : ''}`} aria-label={t.favorites}>
+            <button onClick={() => setShowFavorites(!showFavorites)} className={`group relative hidden size-10 place-items-center rounded-xl border border-slate-200 bg-white transition hover:border-brand-blue/40 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 xl:grid ${showFavorites ? 'text-brand-blue-active' : ''}`} aria-label={t.favorites}>
               <Heart size={18} fill={showFavorites ? 'currentColor' : 'none'} aria-hidden="true" />
               {favorites.length > 0 && <span className="absolute -right-1 -top-1 grid min-h-4 min-w-4 place-items-center rounded-full bg-brand-orange px-1 text-[9px] font-bold text-slate-950">{favorites.length}</span>}
+              <HeaderTooltip label={t.favorites} />
             </button>
-            <button onClick={() => setTrackingOpen(true)} className="hidden size-10 place-items-center rounded-xl border border-slate-200 bg-white transition hover:border-brand-blue/40 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 xl:grid" aria-label={t.tracking}>
+            <button onClick={() => setTrackingOpen(true)} className="group relative hidden size-10 place-items-center rounded-xl border border-slate-200 bg-white transition hover:border-brand-blue/40 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 xl:grid" aria-label={t.tracking}>
               <PackageSearch size={18} aria-hidden="true" />
+              <HeaderTooltip label={t.tracking} />
             </button>
             <nav aria-label={t.primaryNavigation} className="hidden shrink-0 items-center gap-0.5 md:flex">
-              <button type="button" onClick={goHome} aria-label={t.home} className="grid size-10 shrink-0 place-items-center rounded-lg text-slate-700 transition hover:bg-blue-50 hover:text-brand-blue dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white">
+              <button type="button" onClick={goHome} aria-label={t.home} className="group relative grid size-10 shrink-0 place-items-center rounded-lg text-slate-700 transition hover:bg-blue-50 hover:text-brand-blue dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white">
                 <House size={18} aria-hidden="true" />
+                <HeaderTooltip label={t.home} />
               </button>
-              <button type="button" onClick={goCategories} aria-label={t.categories} aria-expanded={panel === 'categories'} className={`grid size-10 shrink-0 place-items-center rounded-lg transition hover:bg-blue-50 hover:text-brand-blue dark:hover:bg-slate-800 dark:hover:text-white ${panel === 'categories' ? 'text-brand-blue' : 'text-slate-700 dark:text-slate-200'}`}>
+              <button type="button" onClick={goCategories} aria-label={t.categories} aria-expanded={panel === 'categories'} className={`group relative grid size-10 shrink-0 place-items-center rounded-lg transition hover:bg-blue-50 hover:text-brand-blue dark:hover:bg-slate-800 dark:hover:text-white ${panel === 'categories' ? 'text-brand-blue' : 'text-slate-700 dark:text-slate-200'}`}>
                 <LayoutGrid size={18} aria-hidden="true" />
+                <HeaderTooltip label={t.categories} />
               </button>
-              <button type="button" onClick={() => openPanel('profile')} aria-label={t.profile} aria-expanded={panel === 'profile'} className={`grid size-10 shrink-0 place-items-center rounded-lg transition hover:bg-blue-50 hover:text-brand-blue dark:hover:bg-slate-800 dark:hover:text-white ${panel === 'profile' ? 'text-brand-blue' : 'text-slate-700 dark:text-slate-200'}`}>
+              <button type="button" onClick={() => openPanel('profile')} aria-label={t.profile} aria-expanded={panel === 'profile'} className={`group relative grid size-10 shrink-0 place-items-center rounded-lg transition hover:bg-blue-50 hover:text-brand-blue dark:hover:bg-slate-800 dark:hover:text-white ${panel === 'profile' ? 'text-brand-blue' : 'text-slate-700 dark:text-slate-200'}`}>
                 <UserRound size={18} aria-hidden="true" />
+                <HeaderTooltip label={t.profile} />
               </button>
               <button type="button" onClick={() => openPanel('menu')} aria-label={t.menu} aria-expanded={panel === 'menu'} className={`inline-flex h-10 shrink-0 items-center gap-2 whitespace-nowrap rounded-full border border-brand-blue/40 bg-white px-3 text-xs font-bold tracking-wide text-brand-blue shadow-sm transition hover:border-brand-blue hover:bg-blue-50 dark:border-slate-600 dark:bg-slate-800 dark:text-blue-300 dark:hover:border-blue-400 dark:hover:bg-slate-700 ${panel === 'menu' ? 'ring-2 ring-brand-blue/20' : ''}`}>
                 <Menu size={17} aria-hidden="true" /><span>{t.menuAction}</span>
