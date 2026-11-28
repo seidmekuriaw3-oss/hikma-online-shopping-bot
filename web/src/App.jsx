@@ -11,7 +11,7 @@ import { adminHeaders, api } from './api.js'
 const words = {
   en: {
     announcement: 'Thoughtful finds. Delivered with care.',
-    shop: 'Shop', story: 'Our promise', help: 'Help', search: 'Search products',
+    shop: 'Shop', story: 'Our promise', help: 'Help', search: 'Search products...',
     heroEyebrow: 'A better way to shop',
     heroTitle: 'Good things, found here.',
     heroBody: 'Hikma Online Shopping — Shop Smart, Buy Easy, Save More.',
@@ -70,11 +70,11 @@ const words = {
     storeNavigation: 'Store navigation', dismiss: 'Close', noCategories: 'Categories will appear here.',
     footerShop: 'Explore', footerHelp: 'Help & support', footerPreferences: 'Preferences',
     addToWishlist: 'Add to wishlist', removeFromWishlist: 'Remove from wishlist',
-    primaryNavigation: 'Main navigation',
+    primaryNavigation: 'Main navigation', menuAction: 'MENU',
   },
   am: {
     announcement: 'በጥንቃቄ የተመረጡ ዕቃዎች፣ በእንክብካቤ ይደርሳሉ።',
-    shop: 'ይግዙ', story: 'ስለ እኛ', help: 'እገዛ', search: 'ምርቶችን ይፈልጉ',
+    shop: 'ይግዙ', story: 'ስለ እኛ', help: 'እገዛ', search: 'ዕቃዎችን እዚህ ይፈልጉ...',
     heroEyebrow: 'በተሻለ መንገድ ይግዙ',
     heroTitle: 'የሚወዷቸው እቃዎች እዚህ አሉ።',
     heroBody: 'ሂክማ ኦንላይን ሾፒንግ — በጥበብ ይግዙ፣ በቀላሉ ይቀበሉ።',
@@ -132,7 +132,7 @@ const words = {
     storeNavigation: 'የሱቅ አሰሳ', dismiss: 'ዝጋ', noCategories: 'ምድቦች እዚህ ይታያሉ።',
     footerShop: 'ይመልከቱ', footerHelp: 'እገዛና ድጋፍ', footerPreferences: 'ቅንብሮች',
     addToWishlist: 'ወደ የተወደዱ ጨምር', removeFromWishlist: 'ከተወደዱ አስወግድ',
-    primaryNavigation: 'ዋና አሰሳ',
+    primaryNavigation: 'ዋና አሰሳ', menuAction: 'ሜኑ',
   },
 }
 
@@ -341,47 +341,44 @@ function App({ telegramUser }) {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 transition-colors dark:bg-brand-navy dark:text-slate-100">
-      <div className="bg-brand-blue px-4 py-2 text-center text-xs tracking-wide text-white/90">
-        <span className="inline-flex items-center gap-2"><Check size={13} />{t.announcement}</span>
-      </div>
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-slate-50/90 backdrop-blur-xl dark:border-slate-700 dark:bg-brand-navy/90">
-        <div className="mx-auto flex h-[72px] max-w-[1440px] items-center justify-between gap-2 px-3 sm:h-20 sm:gap-4 sm:px-7 lg:px-12">
+        <div className="mx-auto flex h-[72px] max-w-[1440px] items-center gap-2 px-3 sm:h-20 sm:gap-3 sm:px-7 lg:gap-4 lg:px-12">
           <a href="/" className="flex shrink-0 items-center" aria-label="Hikma home">
             <img src="/hikma-logo.png" alt="Hikma Online Shopping — Shop Smart, Buy Easy, Save More" width="64" height="64" className="size-12 bg-white object-contain sm:size-16" />
           </a>
-          <nav aria-label={t.primaryNavigation} className="hidden shrink-0 items-center gap-0.5 md:flex lg:gap-1">
-            <button type="button" onClick={goHome} aria-label={t.home} title={t.home} className="flex w-12 flex-col items-center gap-0.5 rounded-xl px-1 py-1.5 text-slate-600 transition hover:bg-blue-50 hover:text-brand-blue dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white">
-              <House size={16} /><span className="max-w-full truncate text-[9px] leading-3">{t.home}</span>
-            </button>
-            <button type="button" onClick={goCategories} aria-label={t.categories} title={t.categories} aria-expanded={panel === 'categories'} className={`flex w-12 flex-col items-center gap-0.5 rounded-xl px-1 py-1.5 transition hover:bg-blue-50 hover:text-brand-blue dark:hover:bg-slate-800 dark:hover:text-white ${panel === 'categories' ? 'text-brand-blue' : 'text-slate-600 dark:text-slate-300'}`}>
-              <LayoutGrid size={16} /><span className="max-w-full truncate text-[9px] leading-3">{t.categories}</span>
-            </button>
-            <button type="button" onClick={() => openPanel('menu')} aria-label={t.menu} title={t.menu} aria-expanded={panel === 'menu'} className={`flex w-12 flex-col items-center gap-0.5 rounded-xl px-1 py-1.5 transition hover:bg-blue-50 hover:text-brand-blue dark:hover:bg-slate-800 dark:hover:text-white ${panel === 'menu' ? 'text-brand-blue' : 'text-slate-600 dark:text-slate-300'}`}>
-              <Menu size={16} /><span className="max-w-full truncate text-[9px] leading-3">{t.menu}</span>
-            </button>
-            <button type="button" onClick={() => openPanel('profile')} aria-label={t.profile} title={t.profile} aria-expanded={panel === 'profile'} className={`flex w-12 flex-col items-center gap-0.5 rounded-xl px-1 py-1.5 transition hover:bg-blue-50 hover:text-brand-blue dark:hover:bg-slate-800 dark:hover:text-white ${panel === 'profile' ? 'text-brand-blue' : 'text-slate-600 dark:text-slate-300'}`}>
-              <UserRound size={16} /><span className="max-w-full truncate text-[9px] leading-3">{t.profile}</span>
-            </button>
-          </nav>
           <label className="hidden h-11 min-w-0 max-w-[360px] flex-1 items-center gap-2.5 rounded-full border border-slate-200 bg-white px-4 transition focus-within:border-brand-blue focus-within:ring-2 focus-within:ring-brand-blue/20 dark:border-slate-700 dark:bg-slate-900 lg:flex">
             <Search size={16} className="shrink-0 text-slate-500" />
             <input ref={searchInputRef} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && recordSearch(query)} placeholder={t.search} className="w-full min-w-0 bg-transparent text-sm outline-none placeholder:text-slate-400" />
           </label>
-          <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+          <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
+            <nav aria-label={t.primaryNavigation} className="hidden shrink-0 items-center gap-0.5 md:flex">
+              <button type="button" onClick={goHome} aria-label={t.home} title={t.home} className="inline-flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-1.5 text-xs font-medium text-slate-700 transition hover:bg-blue-50 hover:text-brand-blue dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white sm:px-2">
+                <House size={16} /><span>{t.home}</span>
+              </button>
+              <button type="button" onClick={goCategories} aria-label={t.categories} title={t.categories} aria-expanded={panel === 'categories'} className={`inline-flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-1.5 text-xs font-medium transition hover:bg-blue-50 hover:text-brand-blue dark:hover:bg-slate-800 dark:hover:text-white sm:px-2 ${panel === 'categories' ? 'text-brand-blue' : 'text-slate-700 dark:text-slate-200'}`}>
+                <LayoutGrid size={16} /><span>{t.categories}</span>
+              </button>
+              <button type="button" onClick={() => openPanel('menu')} aria-label={t.menu} title={t.menu} aria-expanded={panel === 'menu'} className={`inline-flex h-10 shrink-0 items-center gap-2 whitespace-nowrap rounded-full border border-brand-blue/40 bg-white px-3 text-xs font-bold tracking-wide text-brand-blue shadow-sm transition hover:border-brand-blue hover:bg-blue-50 dark:border-slate-600 dark:bg-slate-800 dark:text-blue-300 dark:hover:border-blue-400 dark:hover:bg-slate-700 ${panel === 'menu' ? 'ring-2 ring-brand-blue/20' : ''}`}>
+                <Menu size={17} /><span>{t.menuAction}</span>
+              </button>
+              <button type="button" onClick={() => openPanel('profile')} aria-label={t.profile} title={t.profile} aria-expanded={panel === 'profile'} className={`inline-flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-1.5 text-xs font-medium transition hover:bg-blue-50 hover:text-brand-blue dark:hover:bg-slate-800 dark:hover:text-white sm:px-2 ${panel === 'profile' ? 'text-brand-blue' : 'text-slate-700 dark:text-slate-200'}`}>
+                <UserRound size={16} /><span>{t.profile}</span>
+              </button>
+            </nav>
             <button onClick={() => setLanguage(am ? 'en' : 'am')} className="h-10 min-w-10 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-bold tracking-wide text-brand-blue shadow-sm transition hover:border-brand-blue/50 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-800 dark:text-blue-300 dark:hover:bg-slate-700" aria-label={t.language} title={t.language}>
               {am ? 'EN' : 'አማ'}
             </button>
             <button onClick={() => setDark(!dark)} className="grid size-10 place-items-center rounded-xl border border-slate-200 bg-white transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700" aria-label={dark ? t.lightMode : t.darkMode} title={dark ? t.lightMode : t.darkMode}>
               {dark ? <Sun size={18} /> : <Moon size={18} />}
             </button>
-            <button onClick={() => setShowFavorites(!showFavorites)} className={`relative grid size-10 place-items-center rounded-xl border border-slate-200 bg-white transition hover:border-brand-blue/40 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 ${showFavorites ? 'text-brand-blue-active' : ''}`} aria-label={t.favorites} title={t.favorites}>
+            <button onClick={() => setShowFavorites(!showFavorites)} className={`relative hidden size-10 place-items-center rounded-xl border border-slate-200 bg-white transition hover:border-brand-blue/40 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 xl:grid ${showFavorites ? 'text-brand-blue-active' : ''}`} aria-label={t.favorites} title={t.favorites}>
               <Heart size={18} fill={showFavorites ? 'currentColor' : 'none'} />
               {favorites.length > 0 && <span className="absolute -right-1 -top-1 grid min-h-4 min-w-4 place-items-center rounded-full bg-brand-orange px-1 text-[9px] font-bold text-slate-950">{favorites.length}</span>}
             </button>
-            <button onClick={() => setTrackingOpen(true)} className="hidden size-10 place-items-center rounded-xl border border-slate-200 bg-white transition hover:border-brand-blue/40 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 md:grid" aria-label={t.tracking} title={t.tracking}>
+            <button onClick={() => setTrackingOpen(true)} className="hidden size-10 place-items-center rounded-xl border border-slate-200 bg-white transition hover:border-brand-blue/40 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 xl:grid" aria-label={t.tracking} title={t.tracking}>
               <PackageSearch size={18} />
             </button>
-            <div className="relative hidden md:block" ref={notificationRef}>
+            <div className="relative hidden lg:block" ref={notificationRef}>
               <button onClick={() => setNotificationOpen((current) => !current)} className="relative grid size-10 place-items-center rounded-xl border border-slate-200 bg-white transition hover:border-brand-blue/40 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700" aria-label={t.notifications} aria-expanded={notificationOpen} aria-haspopup="dialog" title={t.notifications}>
                 <Bell size={18} />
                 {unreadCount > 0 && <span className="absolute right-0 top-0 grid min-h-4 min-w-4 place-items-center rounded-full bg-brand-orange px-1 text-[9px] font-bold text-slate-950" aria-label={`${unreadCount} ${t.notificationCount}`}>{unreadCount}</span>}
@@ -390,7 +387,7 @@ function App({ telegramUser }) {
             </div>
             <button onClick={() => setDrawer(true)} className="relative inline-flex h-10 shrink-0 items-center gap-2 rounded-xl bg-brand-blue px-2.5 text-white shadow-sm transition hover:bg-brand-blue-hover sm:px-3" aria-label={`${t.bag} (${quantity})`} title={`${t.bag} (${quantity})`}>
               <ShoppingCart size={19} />
-              <span className="text-xs font-semibold max-[359px]:hidden">{t.bag}</span>
+              <span className="whitespace-nowrap text-xs font-semibold max-[359px]:hidden">{t.bag}</span>
               <span className="grid min-h-5 min-w-5 place-items-center rounded-full bg-brand-orange px-1 text-[10px] font-bold leading-none text-slate-950">{quantity}</span>
             </button>
           </div>
