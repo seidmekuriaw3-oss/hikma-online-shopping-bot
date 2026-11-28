@@ -2,7 +2,8 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
   ArrowDownWideNarrow, ArrowLeft, ArrowRight, Bell, BookOpen, Check, CheckCheck,
   ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Heart, House, LayoutGrid,
-  Menu, Minus, Moon, Plus, Search, Settings, ShoppingBag, SlidersHorizontal, Sparkles,
+  Menu, Minus, Moon, PackageSearch, Plus, Search, Settings, ShoppingBag, ShoppingCart,
+  SlidersHorizontal, Sparkles,
   Store, Sun, Trash2, UserRound, X,
 } from 'lucide-react'
 import { adminHeaders, api } from './api.js'
@@ -67,6 +68,8 @@ const words = {
     unread: 'unread', chooseCategory: 'Choose a category', categoryAll: 'All products',
     supportFaq: 'Support & FAQs', accountInfo: 'Telegram profile',
     storeNavigation: 'Store navigation', dismiss: 'Close', noCategories: 'Categories will appear here.',
+    footerShop: 'Explore', footerHelp: 'Help & support', footerPreferences: 'Preferences',
+    addToWishlist: 'Add to wishlist', removeFromWishlist: 'Remove from wishlist',
   },
   am: {
     announcement: 'በጥንቃቄ የተመረጡ ዕቃዎች፣ በእንክብካቤ ይደርሳሉ።',
@@ -126,6 +129,8 @@ const words = {
     unread: 'ያልተነበቡ', chooseCategory: 'ምድብ ይምረጡ', categoryAll: 'ሁሉም ምርቶች',
     supportFaq: 'ድጋፍና ጥያቄዎች', accountInfo: 'የቴሌግራም መገለጫ',
     storeNavigation: 'የሱቅ አሰሳ', dismiss: 'ዝጋ', noCategories: 'ምድቦች እዚህ ይታያሉ።',
+    footerShop: 'ይመልከቱ', footerHelp: 'እገዛና ድጋፍ', footerPreferences: 'ቅንብሮች',
+    addToWishlist: 'ወደ የተወደዱ ጨምር', removeFromWishlist: 'ከተወደዱ አስወግድ',
   },
 }
 
@@ -169,6 +174,7 @@ function App({ telegramUser }) {
   const [recentlyViewed, setRecentlyViewed] = useState(() => savedList('hikma-recently-viewed'))
   const [searchHistory, setSearchHistory] = useState(() => savedList('hikma-search-history'))
   const notificationRef = useRef(null)
+  const searchInputRef = useRef(null)
   const t = words[language]
   const am = language === 'am'
   const unreadCount = notificationsEnabled ? notifications.filter((item) => !item.read).length : 0
@@ -337,49 +343,45 @@ function App({ telegramUser }) {
         <span className="inline-flex items-center gap-2"><Check size={13} />{t.announcement}</span>
       </div>
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-slate-50/90 backdrop-blur-xl dark:border-slate-700 dark:bg-brand-navy/90">
-        <div className="mx-auto flex h-[76px] max-w-[1440px] items-center justify-between gap-4 px-4 sm:px-7 lg:px-12">
+        <div className="mx-auto flex h-[72px] max-w-[1440px] items-center justify-between gap-2 px-3 sm:h-20 sm:gap-4 sm:px-7 lg:px-12">
           <a href="/" className="flex shrink-0 items-center" aria-label="Hikma home">
-            <img src="/hikma-logo.png" alt="Hikma Online Shopping — Shop Smart, Buy Easy, Save More" width="64" height="64" className="size-16 bg-white object-contain" />
+            <img src="/hikma-logo.png" alt="Hikma Online Shopping — Shop Smart, Buy Easy, Save More" width="64" height="64" className="size-12 bg-white object-contain sm:size-16" />
           </a>
-          <nav className="hidden items-center gap-8 text-sm text-slate-600 dark:text-slate-300 md:flex">
-            <a href="#collection" className="transition hover:text-brand-blue dark:hover:text-white">{t.shop}</a>
-            <a href="#promise" className="transition hover:text-brand-blue dark:hover:text-white">{t.story}</a>
-            <a href="#help" className="transition hover:text-brand-blue dark:hover:text-white">{t.help}</a>
-          </nav>
-          <div className="flex items-center gap-1 sm:gap-2">
-            <button onClick={() => setLanguage(am ? 'en' : 'am')} className="rounded-full px-3 py-2 text-xs font-semibold transition hover:bg-black/5 dark:hover:bg-white/10" aria-label={t.language}>
+          <label className="hidden h-11 min-w-0 max-w-[360px] flex-1 items-center gap-2.5 rounded-full border border-slate-200 bg-white px-4 transition focus-within:border-brand-blue focus-within:ring-2 focus-within:ring-brand-blue/20 dark:border-slate-700 dark:bg-slate-900 lg:flex">
+            <Search size={16} className="shrink-0 text-slate-500" />
+            <input ref={searchInputRef} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && recordSearch(query)} placeholder={t.search} className="w-full min-w-0 bg-transparent text-sm outline-none placeholder:text-slate-400" />
+          </label>
+          <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+            <button onClick={() => setLanguage(am ? 'en' : 'am')} className="h-10 min-w-10 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-bold tracking-wide text-brand-blue shadow-sm transition hover:border-brand-blue/50 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-800 dark:text-blue-300 dark:hover:bg-slate-700" aria-label={t.language} title={t.language}>
               {am ? 'EN' : 'አማ'}
             </button>
-            <button onClick={() => setDark(!dark)} className="grid size-10 place-items-center rounded-full transition hover:bg-black/5 dark:hover:bg-white/10" aria-label={dark ? t.lightMode : t.darkMode} title={dark ? t.lightMode : t.darkMode}>
+            <button onClick={() => setDark(!dark)} className="grid size-10 place-items-center rounded-xl border border-slate-200 bg-white transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700" aria-label={dark ? t.lightMode : t.darkMode} title={dark ? t.lightMode : t.darkMode}>
               {dark ? <Sun size={18} /> : <Moon size={18} />}
             </button>
-            <button onClick={() => setShowFavorites(!showFavorites)} className={`relative grid size-10 place-items-center rounded-full transition hover:bg-black/5 dark:hover:bg-white/10 ${showFavorites ? 'text-brand-blue-active' : ''}`} aria-label={t.favorites}>
+            <button onClick={() => setShowFavorites(!showFavorites)} className={`relative grid size-10 place-items-center rounded-xl border border-slate-200 bg-white transition hover:border-brand-blue/40 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 ${showFavorites ? 'text-brand-blue-active' : ''}`} aria-label={t.favorites} title={t.favorites}>
               <Heart size={18} fill={showFavorites ? 'currentColor' : 'none'} />
-              {favorites.length > 0 && <span className="absolute right-0 top-0 text-[9px]">{favorites.length}</span>}
+              {favorites.length > 0 && <span className="absolute -right-1 -top-1 grid min-h-4 min-w-4 place-items-center rounded-full bg-brand-orange px-1 text-[9px] font-bold text-slate-950">{favorites.length}</span>}
+            </button>
+            <button onClick={() => setTrackingOpen(true)} className="hidden size-10 place-items-center rounded-xl border border-slate-200 bg-white transition hover:border-brand-blue/40 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 md:grid" aria-label={t.tracking} title={t.tracking}>
+              <PackageSearch size={18} />
             </button>
             <div className="relative hidden md:block" ref={notificationRef}>
-              <button onClick={() => setNotificationOpen((current) => !current)} className="relative grid size-10 place-items-center rounded-full transition hover:bg-black/5 dark:hover:bg-white/10" aria-label={t.notifications} aria-expanded={notificationOpen} aria-haspopup="dialog">
+              <button onClick={() => setNotificationOpen((current) => !current)} className="relative grid size-10 place-items-center rounded-xl border border-slate-200 bg-white transition hover:border-brand-blue/40 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700" aria-label={t.notifications} aria-expanded={notificationOpen} aria-haspopup="dialog" title={t.notifications}>
                 <Bell size={18} />
                 {unreadCount > 0 && <span className="absolute right-0 top-0 grid min-h-4 min-w-4 place-items-center rounded-full bg-brand-orange px-1 text-[9px] font-bold text-slate-950" aria-label={`${unreadCount} ${t.notificationCount}`}>{unreadCount}</span>}
               </button>
               {notificationOpen && <NotificationsPopover notifications={notifications} products={products} t={t} onBrowse={() => { setNotificationOpen(false); document.getElementById('collection')?.scrollIntoView({ behavior: 'smooth' }) }} onMarkAllRead={() => setNotifications((current) => current.map((item) => ({ ...item, read: true })))} />}
             </div>
-            <button onClick={() => openPanel('menu')} className="hidden size-10 place-items-center rounded-full transition hover:bg-black/5 dark:hover:bg-white/10 md:grid" aria-label={t.menu} title={t.menu}>
-              <Menu size={18} />
-            </button>
-            <button onClick={() => openPanel('settings')} className="hidden size-10 place-items-center rounded-full transition hover:bg-black/5 dark:hover:bg-white/10 md:grid" aria-label={t.settings} title={t.settings}>
-              <Settings size={18} />
-            </button>
-            <button onClick={() => setTrackingOpen(true)} className="hidden rounded-full px-3 py-2 text-sm transition hover:bg-black/5 dark:hover:bg-white/10 lg:block">{t.tracking}</button>
-            <button onClick={() => setDrawer(true)} className="relative grid size-10 place-items-center rounded-full bg-brand-blue text-white transition hover:bg-brand-blue-hover" aria-label={t.bag}>
-              <ShoppingBag size={18} />
-              {quantity > 0 && <span className="absolute -right-1 -top-1 grid size-[18px] place-items-center rounded-full bg-brand-orange text-[10px] font-bold text-slate-950">{quantity}</span>}
+            <button onClick={() => setDrawer(true)} className="relative inline-flex h-10 shrink-0 items-center gap-2 rounded-xl bg-brand-blue px-2.5 text-white shadow-sm transition hover:bg-brand-blue-hover sm:px-3" aria-label={`${t.bag} (${quantity})`} title={`${t.bag} (${quantity})`}>
+              <ShoppingCart size={19} />
+              <span className="text-xs font-semibold max-[359px]:hidden">{t.bag}</span>
+              <span className="grid min-h-5 min-w-5 place-items-center rounded-full bg-brand-orange px-1 text-[10px] font-bold leading-none text-slate-950">{quantity}</span>
             </button>
           </div>
         </div>
       </header>
 
-      <main className="pb-20 md:pb-8">
+      <main className="pb-24 md:pb-8">
         <section className="mx-auto max-w-[1440px] px-4 pt-5 sm:px-7 sm:pt-8 lg:px-12">
           <div className="hero-grid relative min-h-[430px] overflow-hidden rounded-[26px] bg-brand-blue sm:min-h-[500px] sm:rounded-[34px] lg:min-h-[550px]">
             <div className="relative z-10 flex min-h-[430px] max-w-[690px] flex-col items-start justify-center px-7 py-12 text-white sm:min-h-[500px] sm:px-14 lg:min-h-[550px] lg:px-[74px]">
@@ -403,7 +405,7 @@ function App({ telegramUser }) {
               <h2 className="text-3xl font-medium tracking-[-.04em] sm:text-[40px]">{t.all}</h2>
             </div>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-              <label className="flex h-11 items-center gap-2.5 rounded-full border border-slate-200 bg-white px-4 transition focus-within:border-brand-blue focus-within:ring-2 focus-within:ring-brand-blue/20 dark:border-slate-700 dark:bg-slate-900">
+              <label className="flex h-11 items-center gap-2.5 rounded-full border border-slate-200 bg-white px-4 transition focus-within:border-brand-blue focus-within:ring-2 focus-within:ring-brand-blue/20 dark:border-slate-700 dark:bg-slate-900 lg:hidden">
                 <Search size={16} className="text-slate-500" />
                 <input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && recordSearch(query)} placeholder={t.search} className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400 sm:w-44" />
               </label>
@@ -451,13 +453,44 @@ function App({ telegramUser }) {
         <HelpSection t={t} supportUrl={supportUsername ? `https://t.me/${supportUsername}` : 'https://t.me/'} onTrack={() => setTrackingOpen(true)} onSupport={() => setSupportOpen(true)} />
       </main>
 
-      <footer className="border-t border-slate-200 pb-20 dark:border-slate-700 md:pb-0">
-        <div className="mx-auto flex max-w-[1440px] flex-col gap-3 px-4 py-8 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:px-7 lg:px-12">
-          <a href="/" aria-label="Hikma home" className="inline-flex w-fit items-center">
-            <img src="/hikma-logo.png" alt="Hikma Online Shopping — Shop Smart, Buy Easy, Save More" width="64" height="64" className="size-16 bg-white object-contain" />
-          </a>
-          <span>{t.footer} © {new Date().getFullYear()} Hikma Online Shopping.</span>
-          <button onClick={() => setSupportOpen(true)} className="text-left hover:text-brand-blue dark:hover:text-white">{t.support}</button>
+      <footer className="border-t border-slate-200 pb-24 dark:border-slate-700 md:pb-0">
+        <div className="mx-auto max-w-[1440px] px-4 py-10 sm:px-7 sm:py-12 lg:px-12">
+          <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-[1.5fr_1fr_1fr_1fr] lg:gap-12">
+            <div className="max-w-sm">
+              <a href="/" aria-label="Hikma home" className="inline-flex items-center">
+                <img src="/hikma-logo.png" alt="Hikma Online Shopping — Shop Smart, Buy Easy, Save More" width="64" height="64" className="size-16 bg-white object-contain" />
+              </a>
+              <p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-300">{t.promiseBody}</p>
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900 dark:text-white">{t.footerShop}</h2>
+              <div className="mt-4 flex flex-col items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
+                <a href="#collection" className="hover:text-brand-blue">{t.shop}</a>
+                <button onClick={goCategories} className="hover:text-brand-blue">{t.categories}</button>
+                <a href="#promise" className="hover:text-brand-blue">{t.story}</a>
+              </div>
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900 dark:text-white">{t.footerHelp}</h2>
+              <div className="mt-4 flex flex-col items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
+                <a href="#help" className="hover:text-brand-blue">{t.help}</a>
+                <button onClick={() => setTrackingOpen(true)} className="hover:text-brand-blue">{t.tracking}</button>
+                <button onClick={() => setSupportOpen(true)} className="hover:text-brand-blue">{t.support}</button>
+                <a href={supportUsername ? `https://t.me/${supportUsername}` : 'https://t.me/'} target="_blank" rel="noreferrer" className="hover:text-brand-blue">Telegram ↗</a>
+              </div>
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900 dark:text-white">{t.footerPreferences}</h2>
+              <div className="mt-4 flex flex-col items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
+                <button onClick={() => openPanel('settings')} className="hover:text-brand-blue">{t.settings}</button>
+                <button onClick={() => setLanguage(am ? 'en' : 'am')} className="hover:text-brand-blue">{t.language}: {am ? t.languageEnglish : t.languageAmharic}</button>
+                <button onClick={() => setDark((value) => !value)} className="hover:text-brand-blue">{dark ? t.lightMode : t.darkMode}</button>
+              </div>
+            </div>
+          </div>
+          <div className="mt-8 border-t border-slate-200 pt-5 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+            {t.footer} © {new Date().getFullYear()} Hikma Online Shopping.
+          </div>
         </div>
       </footer>
 
@@ -496,20 +529,22 @@ function ProductCard({ product, am, t, favorite, onFavorite, onClick, onAdd }) {
           {Number(product.stock_quantity) > 0 ? `${product.stock_quantity} ${am ? 'ቀርቷል' : 'left'}` : t.soldOut}
         </span>
         {hasDiscount && <span className="absolute left-3 top-12 rounded-full bg-brand-amber px-3 py-1.5 text-[10px] font-semibold text-slate-950">{discount > 0 ? `-${discount}%` : am ? 'ቅናሽ' : 'Sale'}</span>}
-        <button onClick={onFavorite} className="absolute right-3 top-3 grid size-9 place-items-center rounded-full bg-white/90 text-brand-blue backdrop-blur transition hover:scale-105" aria-label={favorite ? 'Remove from wishlist' : 'Add to wishlist'}>
-          <Heart size={16} fill={favorite ? 'var(--color-brand-blue)' : 'none'} />
-        </button>
-        <button disabled={!Number(product.stock_quantity)} onClick={onAdd} className="absolute bottom-3 right-3 grid size-10 translate-y-2 place-items-center rounded-full bg-brand-blue text-white opacity-0 shadow-lg transition duration-200 hover:bg-brand-blue-hover group-hover:translate-y-0 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-40 max-sm:translate-y-0 max-sm:opacity-100">
-          <Plus size={19} />
-        </button>
       </div>
       <button onClick={onClick} className="mt-3 block w-full text-left">
         <span className="block truncate text-[13px] font-medium sm:text-sm">{name}</span>
-        <span className="mt-1.5 flex items-center justify-between gap-2">
-          <span className="text-sm font-semibold">{formatPrice(product.price)}</span>
-          <span className="truncate text-[11px] text-slate-500">{am ? categoryLabel(product.category || '', true) : product.category}</span>
+        <span className="mt-1.5 flex min-w-0 items-center justify-between gap-2">
+          <span className="shrink-0 text-sm font-semibold">{formatPrice(product.price)}</span>
+          <span className="max-w-[52%] truncate rounded-full bg-slate-100 px-2 py-1 text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-300">{am ? categoryLabel(product.category || '', true) : product.category}</span>
         </span>
       </button>
+      <div className="mt-2.5 flex items-center gap-2">
+        <button onClick={onFavorite} className="grid size-9 shrink-0 place-items-center rounded-xl border border-slate-200 bg-white text-brand-blue transition hover:border-brand-blue/40 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800" aria-label={favorite ? t.removeFromWishlist : t.addToWishlist} title={favorite ? t.removeFromWishlist : t.addToWishlist}>
+          <Heart size={16} fill={favorite ? 'var(--color-brand-blue)' : 'none'} />
+        </button>
+        <button disabled={!Number(product.stock_quantity)} onClick={onAdd} className="inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl bg-brand-blue px-2 py-2.5 text-[11px] font-semibold text-white transition hover:bg-brand-blue-hover disabled:cursor-not-allowed disabled:opacity-50">
+          <Plus size={15} className="shrink-0" /><span className="truncate">{Number(product.stock_quantity) ? t.add : t.soldOut}</span>
+        </button>
+      </div>
     </article>
   )
 }
