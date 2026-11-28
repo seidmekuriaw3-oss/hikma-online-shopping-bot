@@ -70,6 +70,7 @@ const words = {
     storeNavigation: 'Store navigation', dismiss: 'Close', noCategories: 'Categories will appear here.',
     footerShop: 'Explore', footerHelp: 'Help & support', footerPreferences: 'Preferences',
     addToWishlist: 'Add to wishlist', removeFromWishlist: 'Remove from wishlist',
+    primaryNavigation: 'Main navigation',
   },
   am: {
     announcement: 'በጥንቃቄ የተመረጡ ዕቃዎች፣ በእንክብካቤ ይደርሳሉ።',
@@ -131,6 +132,7 @@ const words = {
     storeNavigation: 'የሱቅ አሰሳ', dismiss: 'ዝጋ', noCategories: 'ምድቦች እዚህ ይታያሉ።',
     footerShop: 'ይመልከቱ', footerHelp: 'እገዛና ድጋፍ', footerPreferences: 'ቅንብሮች',
     addToWishlist: 'ወደ የተወደዱ ጨምር', removeFromWishlist: 'ከተወደዱ አስወግድ',
+    primaryNavigation: 'ዋና አሰሳ',
   },
 }
 
@@ -347,6 +349,20 @@ function App({ telegramUser }) {
           <a href="/" className="flex shrink-0 items-center" aria-label="Hikma home">
             <img src="/hikma-logo.png" alt="Hikma Online Shopping — Shop Smart, Buy Easy, Save More" width="64" height="64" className="size-12 bg-white object-contain sm:size-16" />
           </a>
+          <nav aria-label={t.primaryNavigation} className="hidden shrink-0 items-center gap-0.5 md:flex lg:gap-1">
+            <button type="button" onClick={goHome} aria-label={t.home} title={t.home} className="flex w-12 flex-col items-center gap-0.5 rounded-xl px-1 py-1.5 text-slate-600 transition hover:bg-blue-50 hover:text-brand-blue dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white">
+              <House size={16} /><span className="max-w-full truncate text-[9px] leading-3">{t.home}</span>
+            </button>
+            <button type="button" onClick={goCategories} aria-label={t.categories} title={t.categories} aria-expanded={panel === 'categories'} className={`flex w-12 flex-col items-center gap-0.5 rounded-xl px-1 py-1.5 transition hover:bg-blue-50 hover:text-brand-blue dark:hover:bg-slate-800 dark:hover:text-white ${panel === 'categories' ? 'text-brand-blue' : 'text-slate-600 dark:text-slate-300'}`}>
+              <LayoutGrid size={16} /><span className="max-w-full truncate text-[9px] leading-3">{t.categories}</span>
+            </button>
+            <button type="button" onClick={() => openPanel('menu')} aria-label={t.menu} title={t.menu} aria-expanded={panel === 'menu'} className={`flex w-12 flex-col items-center gap-0.5 rounded-xl px-1 py-1.5 transition hover:bg-blue-50 hover:text-brand-blue dark:hover:bg-slate-800 dark:hover:text-white ${panel === 'menu' ? 'text-brand-blue' : 'text-slate-600 dark:text-slate-300'}`}>
+              <Menu size={16} /><span className="max-w-full truncate text-[9px] leading-3">{t.menu}</span>
+            </button>
+            <button type="button" onClick={() => openPanel('profile')} aria-label={t.profile} title={t.profile} aria-expanded={panel === 'profile'} className={`flex w-12 flex-col items-center gap-0.5 rounded-xl px-1 py-1.5 transition hover:bg-blue-50 hover:text-brand-blue dark:hover:bg-slate-800 dark:hover:text-white ${panel === 'profile' ? 'text-brand-blue' : 'text-slate-600 dark:text-slate-300'}`}>
+              <UserRound size={16} /><span className="max-w-full truncate text-[9px] leading-3">{t.profile}</span>
+            </button>
+          </nav>
           <label className="hidden h-11 min-w-0 max-w-[360px] flex-1 items-center gap-2.5 rounded-full border border-slate-200 bg-white px-4 transition focus-within:border-brand-blue focus-within:ring-2 focus-within:ring-brand-blue/20 dark:border-slate-700 dark:bg-slate-900 lg:flex">
             <Search size={16} className="shrink-0 text-slate-500" />
             <input ref={searchInputRef} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && recordSearch(query)} placeholder={t.search} className="w-full min-w-0 bg-transparent text-sm outline-none placeholder:text-slate-400" />
@@ -495,7 +511,7 @@ function App({ telegramUser }) {
       </footer>
 
       <MobileBottomNavigation active={mobileTab} t={t} onHome={goHome} onCategories={goCategories} onMenu={() => openPanel('menu')} onProfile={() => openPanel('profile')} />
-      {panel === 'menu' && <MenuPanel t={t} onClose={closePanel} onHome={goHome} onCategories={goCategories} onTrack={() => { closePanel(); setTrackingOpen(true) }} onFavorites={goFavorites} onHelp={goHelp} onSupport={() => { closePanel(); setSupportOpen(true) }} onSettings={() => openPanel('settings')} />}
+      {panel === 'menu' && <MenuPanel t={t} onClose={closePanel} onHome={goHome} onCategories={goCategories} onTrack={() => { closePanel(); setTrackingOpen(true) }} onFavorites={goFavorites} onPromise={() => { closePanel(); window.setTimeout(() => document.getElementById('promise')?.scrollIntoView({ behavior: 'smooth' }), 0) }} onHelp={goHelp} onSupport={() => { closePanel(); setSupportOpen(true) }} onSettings={() => openPanel('settings')} />}
       {panel === 'categories' && <CategoriesPanel categories={categories} category={category} am={am} t={t} onClose={closePanel} onChoose={chooseCategory} />}
       {panel === 'profile' && <ProfilePanel telegramUser={telegramUser} localOrders={localOrders} favorites={favorites} quantity={quantity} t={t} onClose={closePanel} onTrack={() => { closePanel(); setTrackingOpen(true) }} onFavorites={goFavorites} onSettings={() => openPanel('settings')} />}
       {panel === 'settings' && <SettingsPanel t={t} am={am} dark={dark} quantity={quantity} notificationsEnabled={notificationsEnabled} notifications={notifications} recentlyViewed={recentlyViewed} searchHistory={searchHistory} onClose={closePanel} onLanguage={setLanguage} onTheme={setDark} onToggleNotifications={() => setNotificationsEnabled((current) => !current)} onClearRead={() => setNotifications((current) => current.filter((item) => !item.read))} onClearShoppingData={clearShoppingData} onTrack={() => { closePanel(); setTrackingOpen(true) }} onHelp={goHelp} onSupport={() => { closePanel(); setSupportOpen(true) }} />}
@@ -763,8 +779,8 @@ function MobileBottomNavigation({ active, t, onHome, onCategories, onMenu, onPro
   const items = [
     { id: 'home', label: t.home, Icon: House, onClick: onHome },
     { id: 'categories', label: t.categories, Icon: LayoutGrid, onClick: onCategories },
-    { id: 'menu', label: t.menu, Icon: Menu, onClick: onMenu },
     { id: 'profile', label: t.profile, Icon: UserRound, onClick: onProfile },
+    { id: 'menu', label: t.menu, Icon: Menu, onClick: onMenu },
   ]
   return <nav aria-label={t.storeNavigation} className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-8px_24px_rgb(15_23_42_/_8%)] backdrop-blur-xl dark:border-slate-700 dark:bg-slate-900/95 md:hidden">
     <div className="mx-auto grid min-h-16 max-w-lg grid-cols-4">
@@ -822,13 +838,14 @@ function PanelAction({ Icon, label, description, onClick }) {
   </button>
 }
 
-function MenuPanel({ t, onClose, onHome, onCategories, onTrack, onFavorites, onHelp, onSupport, onSettings }) {
+function MenuPanel({ t, onClose, onHome, onCategories, onTrack, onFavorites, onPromise, onHelp, onSupport, onSettings }) {
   return <DrawerPanel title={t.menu} subtitle={t.supportFaq} t={t} onClose={onClose}>
     <div className="space-y-2.5">
       <PanelAction Icon={House} label={t.home} onClick={onHome} />
       <PanelAction Icon={LayoutGrid} label={t.categories} onClick={onCategories} />
       <PanelAction Icon={ShoppingBag} label={t.tracking} onClick={onTrack} />
       <PanelAction Icon={Heart} label={t.favorites} onClick={onFavorites} />
+      <PanelAction Icon={Sparkles} label={t.story} onClick={onPromise} />
       <PanelAction Icon={BookOpen} label={t.faqs} onClick={onHelp} />
       <PanelAction Icon={CircleHelp} label={t.support} onClick={onSupport} />
       <a href="/admin" className="flex items-center gap-3 rounded-2xl border border-slate-200 p-3 transition hover:border-brand-blue/40 hover:bg-blue-50/60 dark:border-slate-700 dark:hover:bg-slate-800">
