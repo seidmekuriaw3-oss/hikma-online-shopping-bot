@@ -48,12 +48,46 @@ Project layout
 
 Docker
 
-Start the bot and PostgreSQL together with:
+Start the Telegram bot, web storefront, and PostgreSQL together with:
 
 	docker compose up --build
 
-The PostgreSQL data is persisted in the `postgres_data` volume. Back it up
-before applying schema changes to an existing deployment.
+The storefront is available on port `8000`; its protected dashboard is at
+`/admin`. Set a separate, strong `ADMIN_WEB_TOKEN` in `.env` before exposing
+the dashboard. Product photos uploaded in the dashboard persist in the
+`web_uploads` volume, and PostgreSQL data persists in `postgres_data`. Back up
+both volumes before applying schema changes or replacing a deployment.
+
+Web storefront development
+
+The React/Vite storefront lives in `web/`; Flask serves its production build
+and exposes the REST API while continuing to use the existing PostgreSQL
+schema and Telegram bot. For local frontend development, start the bot/database
+or web service, then run:
+
+	cd web
+	npm install
+	npm run dev
+
+The Vite server proxies `/api` and `/uploads` to `http://localhost:8000`.
+Build and run frontend unit tests with:
+
+	cd web
+	npm run build
+	npm test
+
+The storefront uses `ADMIN_USERNAME` for its Telegram support link. Configure
+it in `.env` to enable a direct link to the store owner. Customers can track
+an order with its number/ID or the phone number used at checkout.
+Set `WEB_APP_URL` to the public HTTPS storefront URL to show a Telegram
+Mini App button in the bot's welcome keyboard.
+
+For Railway, deploy the repository using the Dockerfile and set the service
+start command to `python web_storefront.py` for the storefront service. Set
+`DATABASE_URL`, `ADMIN_WEB_TOKEN`, `BOT_TOKEN`, `ADMIN_IDS`, and `ADMIN_USERNAME`
+as Railway variables; run the Telegram bot as a separate service using the
+same image with start command `python main.py`. Attach persistent storage at
+`/app/web/uploads` for product photos.
 
 Testing
 

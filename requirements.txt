@@ -4,3 +4,4 @@ requests
 pytz
 psycopg2-binary
 Flask
+waitress

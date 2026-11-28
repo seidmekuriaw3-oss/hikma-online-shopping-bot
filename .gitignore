@@ -22,6 +22,8 @@ config.json
 build/
 dist/
 coverage/
+node_modules/
+web/uploads/
 *.sqlite3
 *.sqlite
 *.db

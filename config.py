@@ -47,6 +47,7 @@ class BotConfig:
     # የቦት ስም
     BOT_NAME: str = os.getenv('BOT_NAME', 'ሂክማ ኦንላይን ሾፒንግ')
     BOT_USERNAME: str = os.getenv('BOT_USERNAME', '')
+    WEB_APP_URL: str = os.getenv('WEB_APP_URL', '').strip()
     
     # ዌብሁክ ውቅር
     USE_WEBHOOK: bool = os.getenv('USE_WEBHOOK', 'False').lower() == 'true'
@@ -79,6 +80,10 @@ class BotConfig:
             raise ValueError("❌ SECRET_KEY ማዘጋጀት አለበት!")
         if self.USE_WEBHOOK and self.WEBHOOK_URL == 'https://example.com':
             raise ValueError("❌ WEBHOOK_URL መዘጋጀት አለበት!")
+        if self.WEB_APP_URL:
+            web_app_url = urlsplit(self.WEB_APP_URL)
+            if web_app_url.scheme != 'https' or not web_app_url.hostname:
+                raise ValueError('WEB_APP_URL must be an HTTPS URL')
         return True
 
 

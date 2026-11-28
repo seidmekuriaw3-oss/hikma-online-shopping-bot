@@ -8,3 +8,5 @@ logs
 assets/documents/backups
 assets/temp
 tests
+web/node_modules
+web/dist

@@ -6,7 +6,7 @@ Hikma Online Shopping Bot - Inline ኪቦርዶች
 """
 
 from typing import Dict, List, Optional
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 
 from config import config
 from utils.helpers import get_text, format_payment_method
@@ -115,6 +115,11 @@ def get_start_keyboard(lang: str = 'am') -> InlineKeyboardMarkup:
             callback_data="change_language",
         ),
     )
+    if config.bot.WEB_APP_URL:
+        markup.row(InlineKeyboardButton(
+            "🌐 የድር ሱቅ" if lang == 'am' else "🌐 Open web shop",
+            web_app=WebAppInfo(url=config.bot.WEB_APP_URL),
+        ))
     return markup
 
 

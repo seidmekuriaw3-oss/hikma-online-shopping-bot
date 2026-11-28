@@ -200,6 +200,7 @@ class Database:
         """ሁሉንም የውሂብ ጎታ ሰንጠረዦች መፍጠር"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
+            cursor.execute('SELECT pg_advisory_xact_lock(%s)', (384729105,))
             
             # 1. ተጠቃሚዎች
             cursor.execute('''
@@ -280,6 +281,17 @@ class Database:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     delivered_at TIMESTAMP,
                     FOREIGN KEY (user_id) REFERENCES users(user_id)
+                )
+            ''')
+
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS support_inquiries (
+                    id TEXT PRIMARY KEY DEFAULT md5(random()::text || clock_timestamp()::text),
+                    name TEXT NOT NULL,
+                    phone TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    status TEXT DEFAULT 'Pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
             

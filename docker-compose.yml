@@ -9,6 +9,23 @@ services:
       postgres:
         condition: service_healthy
 
+  web:
+    build: .
+    command: ["python", "web_storefront.py"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-hikma}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-hikma}
+      PORT: 8000
+      UPLOAD_DIR: /app/web/uploads
+    ports:
+      - "8000:8000"
+    volumes:
+      - web_uploads:/app/web/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   postgres:
     image: postgres:16-alpine
     ports:
@@ -27,3 +44,4 @@ services:
 
 volumes:
   postgres_data:
+  web_uploads:
