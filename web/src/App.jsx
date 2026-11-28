@@ -351,32 +351,11 @@ function App({ telegramUser }) {
             <input ref={searchInputRef} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && recordSearch(query)} placeholder={t.search} className="w-full min-w-0 bg-transparent text-sm outline-none placeholder:text-slate-400" />
           </label>
           <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
-            <nav aria-label={t.primaryNavigation} className="hidden shrink-0 items-center gap-0.5 md:flex">
-              <button type="button" onClick={goHome} aria-label={t.home} title={t.home} className="inline-flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-1.5 text-xs font-medium text-slate-700 transition hover:bg-blue-50 hover:text-brand-blue dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white sm:px-2">
-                <House size={16} /><span>{t.home}</span>
-              </button>
-              <button type="button" onClick={goCategories} aria-label={t.categories} title={t.categories} aria-expanded={panel === 'categories'} className={`inline-flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-1.5 text-xs font-medium transition hover:bg-blue-50 hover:text-brand-blue dark:hover:bg-slate-800 dark:hover:text-white sm:px-2 ${panel === 'categories' ? 'text-brand-blue' : 'text-slate-700 dark:text-slate-200'}`}>
-                <LayoutGrid size={16} /><span>{t.categories}</span>
-              </button>
-              <button type="button" onClick={() => openPanel('menu')} aria-label={t.menu} title={t.menu} aria-expanded={panel === 'menu'} className={`inline-flex h-10 shrink-0 items-center gap-2 whitespace-nowrap rounded-full border border-brand-blue/40 bg-white px-3 text-xs font-bold tracking-wide text-brand-blue shadow-sm transition hover:border-brand-blue hover:bg-blue-50 dark:border-slate-600 dark:bg-slate-800 dark:text-blue-300 dark:hover:border-blue-400 dark:hover:bg-slate-700 ${panel === 'menu' ? 'ring-2 ring-brand-blue/20' : ''}`}>
-                <Menu size={17} /><span>{t.menuAction}</span>
-              </button>
-              <button type="button" onClick={() => openPanel('profile')} aria-label={t.profile} title={t.profile} aria-expanded={panel === 'profile'} className={`inline-flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-1.5 text-xs font-medium transition hover:bg-blue-50 hover:text-brand-blue dark:hover:bg-slate-800 dark:hover:text-white sm:px-2 ${panel === 'profile' ? 'text-brand-blue' : 'text-slate-700 dark:text-slate-200'}`}>
-                <UserRound size={16} /><span>{t.profile}</span>
-              </button>
-            </nav>
             <button onClick={() => setLanguage(am ? 'en' : 'am')} className="h-10 min-w-10 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-bold tracking-wide text-brand-blue shadow-sm transition hover:border-brand-blue/50 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-800 dark:text-blue-300 dark:hover:bg-slate-700" aria-label={t.language} title={t.language}>
               {am ? 'EN' : 'አማ'}
             </button>
             <button onClick={() => setDark(!dark)} className="grid size-10 place-items-center rounded-xl border border-slate-200 bg-white transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700" aria-label={dark ? t.lightMode : t.darkMode} title={dark ? t.lightMode : t.darkMode}>
               {dark ? <Sun size={18} /> : <Moon size={18} />}
-            </button>
-            <button onClick={() => setShowFavorites(!showFavorites)} className={`relative hidden size-10 place-items-center rounded-xl border border-slate-200 bg-white transition hover:border-brand-blue/40 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 xl:grid ${showFavorites ? 'text-brand-blue-active' : ''}`} aria-label={t.favorites} title={t.favorites}>
-              <Heart size={18} fill={showFavorites ? 'currentColor' : 'none'} />
-              {favorites.length > 0 && <span className="absolute -right-1 -top-1 grid min-h-4 min-w-4 place-items-center rounded-full bg-brand-orange px-1 text-[9px] font-bold text-slate-950">{favorites.length}</span>}
-            </button>
-            <button onClick={() => setTrackingOpen(true)} className="hidden size-10 place-items-center rounded-xl border border-slate-200 bg-white transition hover:border-brand-blue/40 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 xl:grid" aria-label={t.tracking} title={t.tracking}>
-              <PackageSearch size={18} />
             </button>
             <div className="relative hidden lg:block" ref={notificationRef}>
               <button onClick={() => setNotificationOpen((current) => !current)} className="relative grid size-10 place-items-center rounded-xl border border-slate-200 bg-white transition hover:border-brand-blue/40 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700" aria-label={t.notifications} aria-expanded={notificationOpen} aria-haspopup="dialog" title={t.notifications}>
@@ -390,6 +369,27 @@ function App({ telegramUser }) {
               <span className="whitespace-nowrap text-xs font-semibold max-[359px]:hidden">{t.bag}</span>
               <span className="grid min-h-5 min-w-5 place-items-center rounded-full bg-brand-orange px-1 text-[10px] font-bold leading-none text-slate-950">{quantity}</span>
             </button>
+            <button onClick={() => setShowFavorites(!showFavorites)} className={`relative hidden size-10 place-items-center rounded-xl border border-slate-200 bg-white transition hover:border-brand-blue/40 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 xl:grid ${showFavorites ? 'text-brand-blue-active' : ''}`} aria-label={t.favorites} title={t.favorites}>
+              <Heart size={18} fill={showFavorites ? 'currentColor' : 'none'} />
+              {favorites.length > 0 && <span className="absolute -right-1 -top-1 grid min-h-4 min-w-4 place-items-center rounded-full bg-brand-orange px-1 text-[9px] font-bold text-slate-950">{favorites.length}</span>}
+            </button>
+            <button onClick={() => setTrackingOpen(true)} className="hidden size-10 place-items-center rounded-xl border border-slate-200 bg-white transition hover:border-brand-blue/40 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 xl:grid" aria-label={t.tracking} title={t.tracking}>
+              <PackageSearch size={18} />
+            </button>
+            <nav aria-label={t.primaryNavigation} className="hidden shrink-0 items-center gap-0.5 md:flex">
+              <button type="button" onClick={goHome} aria-label={t.home} title={t.home} className="inline-flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-1.5 text-xs font-medium text-slate-700 transition hover:bg-blue-50 hover:text-brand-blue dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white sm:px-2">
+                <House size={16} /><span>{t.home}</span>
+              </button>
+              <button type="button" onClick={goCategories} aria-label={t.categories} title={t.categories} aria-expanded={panel === 'categories'} className={`inline-flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-1.5 text-xs font-medium transition hover:bg-blue-50 hover:text-brand-blue dark:hover:bg-slate-800 dark:hover:text-white sm:px-2 ${panel === 'categories' ? 'text-brand-blue' : 'text-slate-700 dark:text-slate-200'}`}>
+                <LayoutGrid size={16} /><span>{t.categories}</span>
+              </button>
+              <button type="button" onClick={() => openPanel('profile')} aria-label={t.profile} title={t.profile} aria-expanded={panel === 'profile'} className={`inline-flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-1.5 text-xs font-medium transition hover:bg-blue-50 hover:text-brand-blue dark:hover:bg-slate-800 dark:hover:text-white sm:px-2 ${panel === 'profile' ? 'text-brand-blue' : 'text-slate-700 dark:text-slate-200'}`}>
+                <UserRound size={16} /><span>{t.profile}</span>
+              </button>
+              <button type="button" onClick={() => openPanel('menu')} aria-label={t.menu} title={t.menu} aria-expanded={panel === 'menu'} className={`inline-flex h-10 shrink-0 items-center gap-2 whitespace-nowrap rounded-full border border-brand-blue/40 bg-white px-3 text-xs font-bold tracking-wide text-brand-blue shadow-sm transition hover:border-brand-blue hover:bg-blue-50 dark:border-slate-600 dark:bg-slate-800 dark:text-blue-300 dark:hover:border-blue-400 dark:hover:bg-slate-700 ${panel === 'menu' ? 'ring-2 ring-brand-blue/20' : ''}`}>
+                <Menu size={17} /><span>{t.menuAction}</span>
+              </button>
+            </nav>
           </div>
         </div>
       </header>
