@@ -373,8 +373,8 @@ function App({ telegramUser }) {
               </button>
               {notificationOpen && <NotificationsPopover notifications={notifications} products={products} t={t} onBrowse={() => { setNotificationOpen(false); document.getElementById('collection')?.scrollIntoView({ behavior: 'smooth' }) }} onMarkAllRead={() => setNotifications((current) => current.map((item) => ({ ...item, read: true })))} />}
             </div>
-            <button onClick={() => setDrawer(true)} className="group relative grid size-10 shrink-0 place-items-center rounded-xl bg-brand-blue text-white shadow-sm transition hover:bg-brand-blue-hover" aria-label={`${t.bag} (${quantity})`}>
-              <ShoppingCart size={19} aria-hidden="true" />
+            <button onClick={() => setDrawer(true)} className="group relative grid size-10 shrink-0 place-items-center rounded-xl border border-slate-200 bg-white text-brand-blue shadow-sm transition hover:border-brand-blue/40 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-800 dark:text-blue-300 dark:hover:bg-slate-700" aria-label={`${t.bag} (${quantity})`}>
+              <ShoppingCart size={18} aria-hidden="true" />
               <span className="absolute -right-1 -top-1 grid min-h-4 min-w-4 place-items-center rounded-full bg-brand-orange px-1 text-[9px] font-bold leading-none text-slate-950" aria-hidden="true">{quantity}</span>
               <HeaderTooltip label={t.bag} alignRight />
             </button>
